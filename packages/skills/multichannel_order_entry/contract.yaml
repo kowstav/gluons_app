@@ -1,0 +1,152 @@
+# Authority layer for gluons_blueprint/skills/multichannel_order_entry.
+# Email, WhatsApp and voice all feed this one graph through the shared order engine.
+id: gluons.multichannel_order_entry
+slug: multichannel_order_entry
+version: 1.0.0
+title: Multichannel Order Entry
+domain: orders
+risk_tier: R3
+activation_modes: [historical_replay, shadow, supervised, live]
+baseline_minutes_per_task: 6
+inputs:
+  type: object
+  required: [text]
+  properties:
+    text: {type: string, description: Order text, transcript, or extracted document text. Untrusted.}
+    sender: {type: string}
+    phone: {type: string}
+    channel: {type: string, enum: [email, whatsapp, voice, upload]}
+    thread_id: {type: string}
+outputs:
+  type: object
+  properties:
+    order_business_key: {type: string}
+    erp_order: {type: object}
+connectors:
+  - capability: erp
+    providers: [erpnext]
+    purpose: Create the order and read it back.
+  - capability: email
+    providers: [gmail]
+    purpose: Send the customer confirmation after the ERP readback.
+    required_for_live: false
+    scopes: {gmail: ["https://www.googleapis.com/auth/gmail.send"]}
+actions: [erp.order.create, email.send]
+default_policy:
+  mode: supervised
+  allowed_actions: [erp.order.create]
+  resource_filters:
+    email.send: {recipient_must_be_verified_customer: true, requires_verified_order: true}
+graph:
+  entry: capture
+  nodes:
+    capture:
+      primitive: capture_event
+      blueprint_steps: [1]
+      checkpoint: true
+      next: resolve_customer
+    resolve_customer:
+      primitive: domain
+      params: {fn: orders.resolve_customer}
+      blueprint_steps: [2]
+      next: extract
+      branches: {unknown: review_unknown_customer}
+    review_unknown_customer:
+      primitive: human_review
+      params: {title: Unknown customer on an incoming order, risk_tier: R2}
+      next: stop_no_customer
+      branches: {shadow: finish_escalated, approved: stop_no_customer, denied: stop_no_customer}
+    stop_no_customer:
+      primitive: escalate
+      params: {summary: An order arrived from a sender with no matching customer account.}
+    extract:
+      primitive: domain
+      params: {fn: orders.extract}
+      blueprint_steps: [3]
+      next: match
+    match:
+      primitive: domain
+      params: {fn: orders.match_catalog}
+      blueprint_steps: [4, 5]
+      next: draft
+    draft:
+      primitive: domain
+      params: {fn: orders.build_draft}
+      blueprint_steps: [6]
+      next: write_erp
+      branches: {clean: write_erp, needs_review: review}
+    review:
+      primitive: human_review
+      params: {title: This order needs a person, subject: lines, risk_tier: R2}
+      blueprint_steps: [7]
+      checkpoint: true
+      next: apply_review
+      branches: {approved: apply_review, denied: stop_rejected, shadow: finish_escalated}
+    apply_review:
+      primitive: domain
+      params: {fn: orders.apply_review}
+      next: write_erp
+      branches: {rematch: match, continue: write_erp, stop: stop_rejected}
+    stop_rejected:
+      primitive: escalate
+      params: {summary: A reviewer stopped this order.}
+    write_erp:
+      primitive: action
+      params:
+        action: erp.order.create
+        input_from: erp_payload
+        store_as: erp_order
+        title: Create this order in the ERP
+        summary_from: order_summary
+      blueprint_steps: [7]
+      checkpoint: true
+      next: record_written
+      branches: {previewed: finish_shadow, denied: stop_denied}
+    stop_denied:
+      primitive: escalate
+      params: {summary: The ERP write was not authorized., kind: policy_denied}
+    record_written:
+      primitive: domain
+      params: {fn: orders.record_written}
+      next: build_confirmation
+    build_confirmation:
+      primitive: domain
+      params: {fn: orders.build_confirmation}
+      blueprint_steps: [8]
+      next: send_confirmation
+      branches: {skip: finish}
+    send_confirmation:
+      primitive: action
+      params:
+        action: email.send
+        input_from: confirmation
+        resources_from: confirmation_resources
+        store_as: confirmation_sent
+        title: Send the customer confirmation
+      blueprint_steps: [8]
+      checkpoint: true
+      next: finish
+      branches: {denied: finish}
+    finish:
+      primitive: complete
+      params: {requires_verified: [erp.order.create], report: [order_summary, erp_order, confirmation_skipped]}
+    finish_shadow:
+      primitive: complete
+      params: {outcome: shadow_would_create_order, report: [order_summary, lines]}
+    finish_escalated:
+      primitive: complete
+      params: {outcome: shadow_would_escalate, report: [review_reasons, lines]}
+failure_handling:
+  Ambiguous SKU: review
+  duplicate customer message: draft
+  unavailable product: review
+  unknown customer: review_unknown_customer
+  invalid unit conversion: review
+  ERP outage: write_erp
+metrics: [line_item_accuracy, percent_zero_touch, order_processing_seconds, corrections_per_100_orders, duplicate_orders]
+blockers:
+  - dependency: ERPNext site
+    needed: A real ERPNext sandbox and API key to replace the local simulator.
+    kind: customer_system
+limitations:
+  - Parsing is rule-based until a model provider is configured.
