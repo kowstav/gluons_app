@@ -16,7 +16,7 @@ PASSWORD = "correct-horse-battery"  # noqa: S105
 
 
 def make_user(email: str | None = None, name: str = "Test Owner") -> tuple[str, str]:
-    address = email or f"{new_id('user')}@example.test"
+    address = email or f"{new_id('user')}@example.com"
     identity.register(address, PASSWORD, name)
     with public_tx() as session:
         session.execute(update(User).where(User.email == address).values(email_verified_at=utcnow()))
@@ -65,7 +65,7 @@ class World:
             session.add(
                 Customer(
                     id=new_id("cus"), tenant_id=self.tenant_id, name="Harbor Bistro",
-                    emails=["orders@harbor.example"], phones=["+15550100"], alias_map={"the usual fish": "FISH-1"},
+                    emails=["orders@harbor-bistro.com"], phones=["+15550100"], alias_map={"the usual fish": "FISH-1"},
                 )
             )
 
@@ -114,7 +114,7 @@ def order_event(world: World, automation_id: str, event_id: str = "mail-1", text
         automation_id,
         source="email",
         source_event_id=event_id,
-        payload={"text": text, "sender": "orders@harbor.example", "channel": "email"},
+        payload={"text": text, "sender": "orders@harbor-bistro.com", "channel": "email"},
     )
 
 

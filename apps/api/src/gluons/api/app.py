@@ -1,0 +1,101 @@
+"""HTTP application. Route modules in `gluons.api.routes` are discovered automatically."""
+from __future__ import annotations
+
+import importlib
+import logging
+import pkgutil
+import time
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
+from gluons import __version__
+from gluons.api import routes
+from gluons.config import get_settings
+from gluons.core import GluonsError, new_id
+from gluons.db.session import public_tx
+from gluons.skills.registry import get_registry
+
+logger = logging.getLogger("gluons.api")
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(
+        title="Gluons API",
+        version=__version__,
+        docs_url=None if settings.env == "production" else "/docs",
+        redoc_url=None,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.web_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "Authorization"],
+    )
+
+    @app.middleware("http")
+    async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
+        request_id = request.headers.get("x-request-id") or new_id("req")
+        started = time.monotonic()
+        response = await call_next(request)
+        response.headers["X-Request-Id"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        logger.info(
+            "request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+        return response
+
+    @app.exception_handler(GluonsError)
+    async def on_gluons_error(request: Request, exc: GluonsError) -> JSONResponse:
+        return JSONResponse({"error": exc.to_dict()}, status_code=exc.status)
+
+    @app.exception_handler(RequestValidationError)
+    async def on_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        fields = [{"field": ".".join(str(p) for p in e["loc"][1:]), "message": e["msg"]} for e in exc.errors()]
+        return JSONResponse(
+            {"error": {"code": "VALIDATION_FAILED", "message": "Check the highlighted fields.", "details": {"fields": fields}}},
+            status_code=422,
+        )
+
+    @app.get("/health", tags=["ops"])
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/ready", tags=["ops"])
+    def ready() -> JSONResponse:
+        checks: dict[str, str] = {}
+        try:
+            with public_tx() as session:
+                session.execute(text("select 1"))
+            checks["database"] = "ok"
+        except Exception:  # noqa: BLE001 - readiness reports, never raises
+            checks["database"] = "unavailable"
+        try:
+            checks["skills"] = str(len(get_registry()))
+        except Exception:  # noqa: BLE001 - a bad contract must show up here
+            checks["skills"] = "invalid"
+        healthy = checks["database"] == "ok" and checks["skills"] != "invalid"
+        return JSONResponse({"status": "ok" if healthy else "degraded", "checks": checks}, status_code=200 if healthy else 503)
+
+    for module in pkgutil.iter_modules(routes.__path__):
+        loaded = importlib.import_module(f"{routes.__name__}.{module.name}")
+        router = getattr(loaded, "router", None)
+        if router is not None:
+            app.include_router(router)
+    return app
+
+
+app = create_app()
