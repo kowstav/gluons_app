@@ -1,0 +1,405 @@
+[
+  {
+    "skill_id": "multichannel_order_entry",
+    "company_category_reference": "Asakana",
+    "repo_ids": [
+      "docling_project__docling",
+      "microsoft__markitdown",
+      "activepieces__activepieces",
+      "frappe__erpnext"
+    ],
+    "still_must_build": "Customer alias resolution, exact catalog match, ERP idempotent write, customer approval",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "restaurant_inventory_planning",
+    "company_category_reference": "Marble",
+    "repo_ids": [
+      "frappe__erpnext",
+      "google__or_tools",
+      "docling_project__docling",
+      "invoice_x__invoice2data"
+    ],
+    "still_must_build": "Forecasting model, recipe conversion, procurement rules, real POS sync",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "restaurant_voice_ordering",
+    "company_category_reference": "Certus AI",
+    "repo_ids": [
+      "elevenlabs__elevenlabs_python",
+      "activepieces__activepieces",
+      "frappe__erpnext"
+    ],
+    "still_must_build": "Live telephony number, menu knowledge, POS transaction integration, call routing",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "property_maintenance",
+    "company_category_reference": "Brickwise",
+    "repo_ids": [
+      "chatwoot__chatwoot",
+      "novuhq__novu",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Tenant/property/vendor entities, compliance, spending approval, contractor dispatch",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "freight_order_to_cash",
+    "company_category_reference": "Lunavo",
+    "repo_ids": [
+      "docling_project__docling",
+      "google__or_tools",
+      "Project_OSRM__osrm_backend",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Carrier-specific TMS/POD integration, rate contract reconciliation, notification rules",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "title_closing_support",
+    "company_category_reference": "Vestris",
+    "repo_ids": [
+      "docling_project__docling",
+      "microsoft__markitdown",
+      "browser_use__browser_use"
+    ],
+    "still_must_build": "Authorized property-record access, state-specific legal review, closing software integration",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "workflow_discovery",
+    "company_category_reference": "Cofia",
+    "repo_ids": [
+      "langchain_ai__langgraph",
+      "browser_use__browser_use",
+      "data_privacy_stack__presidio"
+    ],
+    "still_must_build": "Consented desktop telemetry and proof of repetition, policy, generated integration tests",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "ecommerce_returns",
+    "company_category_reference": "Pango",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "novuhq__novu",
+      "chatwoot__chatwoot"
+    ],
+    "still_must_build": "Shopify returns/order APIs, carrier labels, refund rules, fraud checks",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "shopping_guidance",
+    "company_category_reference": "Kinect",
+    "repo_ids": [
+      "meilisearch__meilisearch",
+      "langchain_ai__langgraph",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Merchant catalog grounding, stock correctness, live storefront plugin",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "local_creator_campaigns",
+    "company_category_reference": "TryNearby",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "novuhq__novu"
+    ],
+    "still_must_build": "Creator opt-in, matching data, contracted scheduling, platform-compliant messaging",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "field_service_opportunity_detection",
+    "company_category_reference": "Robby",
+    "repo_ids": [
+      "twentyhq__twenty",
+      "langchain_ai__langgraph",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Service-history enrichment, customer consent, fair upsell policy, CRM integration",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "field_inspection_reports",
+    "company_category_reference": "Opusense AI",
+    "repo_ids": [
+      "docling_project__docling",
+      "microsoft__markitdown",
+      "data_privacy_stack__presidio"
+    ],
+    "still_must_build": "Capture app, geotagged/photos evidence, inspector template/legal approval",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "construction_estimates",
+    "company_category_reference": "FlowManual",
+    "repo_ids": [
+      "docling_project__docling",
+      "google__or_tools"
+    ],
+    "still_must_build": "Drawing-level quantity takeoff, measurement accuracy, estimator sign-off",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "property_valuation_reports",
+    "company_category_reference": "Automax.ai",
+    "repo_ids": [
+      "docling_project__docling",
+      "meilisearch__meilisearch"
+    ],
+    "still_must_build": "Licensed appraiser process, permitted comps, valuation research/legal sign-off",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "bookkeeping_reconciliation",
+    "company_category_reference": "Balance",
+    "repo_ids": [
+      "invoice_x__invoice2data",
+      "docling_project__docling",
+      "frappe__erpnext"
+    ],
+    "still_must_build": "Bank feeds, ledger matching, tax rules, reconciliation controls, CPA review",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "tax_return_preparation",
+    "company_category_reference": "Cranston AI",
+    "repo_ids": [
+      "docling_project__docling",
+      "microsoft__markitdown",
+      "invoice_x__invoice2data"
+    ],
+    "still_must_build": "Jurisdiction-specific forms, licensed tax reviewer, tax software restrictions",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "accounting_practice_operations",
+    "company_category_reference": "Combinely",
+    "repo_ids": [
+      "invoice_x__invoice2data",
+      "docling_project__docling",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Client ledger mapping, payroll portal rights, HMRC/agency rules and approvals",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "legal_matter_intake",
+    "company_category_reference": "Praxis",
+    "repo_ids": [
+      "chatwoot__chatwoot",
+      "docling_project__docling",
+      "novuhq__novu"
+    ],
+    "still_must_build": "Lawyer-controlled conflict search, ethical duties, consent and engagement letter",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "commercial_insurance_submission",
+    "company_category_reference": "Casey",
+    "repo_ids": [
+      "docling_project__docling",
+      "invoice_x__invoice2data",
+      "browser_use__browser_use"
+    ],
+    "still_must_build": "Carrier-specific forms/risk rules, licensing, approved submissions",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "candidate_screening",
+    "company_category_reference": "Asendia AI",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "chatwoot__chatwoot",
+      "novuhq__novu"
+    ],
+    "still_must_build": "ATS adapter, fairness evaluation, applicant consent and interview scripts",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "dental_reception_and_claims",
+    "company_category_reference": "Patientdesk.ai",
+    "repo_ids": [
+      "elevenlabs__elevenlabs_python",
+      "novuhq__novu",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Practice management APIs, eligibility services, protected health data safeguards",
+    "repo_fit": "LOW_REGULATED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "hardware_procurement",
+    "company_category_reference": "Waybill",
+    "repo_ids": [
+      "frappe__erpnext",
+      "docling_project__docling",
+      "google__or_tools"
+    ],
+    "still_must_build": "Vendor quotes, BOM normalization, customer approvals, vendor payment systems",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "website_organic_growth",
+    "company_category_reference": "Theo",
+    "repo_ids": [
+      "browser_use__browser_use",
+      "microsoft__markitdown",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Google Search Console OAuth, CMS publishing rules, SEO tests",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "lead_research_and_outreach",
+    "company_category_reference": "LemonLime",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "twentyhq__twenty",
+      "data_privacy_stack__presidio"
+    ],
+    "still_must_build": "Permissioned lead data, opt-out, enrichment rights, email deliverability",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "crm_reactivation_and_hygiene",
+    "company_category_reference": "Nex",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "twentyhq__twenty",
+      "langchain_ai__langgraph"
+    ],
+    "still_must_build": "Record dedup and merge policy, consent, outbound message guardrails",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "paid_ad_campaign_operations",
+    "company_category_reference": "Uplane",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "langchain_ai__langgraph"
+    ],
+    "still_must_build": "Platform ad APIs and advertiser permissions, budgets, creatives, human approval",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "social_media_operations",
+    "company_category_reference": "Tell if AI",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "novuhq__novu"
+    ],
+    "still_must_build": "Official platform APIs, brand approval, authentic account practices",
+    "repo_fit": "LOW_PLATFORM_RESTRICTED",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "abandoned_cart_retention",
+    "company_category_reference": "Boom AI",
+    "repo_ids": [
+      "activepieces__activepieces",
+      "novuhq__novu",
+      "chatwoot__chatwoot"
+    ],
+    "still_must_build": "Shopify cart/order API, consent policy, campaign caps, attribution",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "outbound_shipping_management",
+    "company_category_reference": "Pango",
+    "repo_ids": [
+      "frappe__erpnext",
+      "Project_OSRM__osrm_backend",
+      "VROOM_Project__vroom",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Carrier/warehouse APIs, labels, tracking, refund/claim policy",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "custom_legacy_workflow",
+    "company_category_reference": "Async",
+    "repo_ids": [
+      "browser_use__browser_use",
+      "langchain_ai__langgraph",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Customer-specific application permission, fragile UI selectors, approvals, anti-bot terms",
+    "repo_fit": "MEDIUM",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  },
+  {
+    "skill_id": "home_service_dispatch",
+    "company_category_reference": "Fleety",
+    "repo_ids": [
+      "google__or_tools",
+      "VROOM_Project__vroom",
+      "Project_OSRM__osrm_backend",
+      "activepieces__activepieces"
+    ],
+    "still_must_build": "Technician skills, priorities, real-time availability, CRM/field-service writebacks",
+    "repo_fit": "HIGH",
+    "integration_status": "PLANNED_NOT_BUILT",
+    "is_complete_open_source_equivalent": false
+  }
+]

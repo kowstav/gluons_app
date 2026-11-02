@@ -1,0 +1,17 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"https://gluons.example/schemas/automation.schema.json",
+ "title":"Gluons AutomationDefinition",
+ "type":"object","additionalProperties":false,
+ "required":["id","skill_id","skill_version","mode","status","risk_tier","policy_version","budget","source_connections"],
+ "properties":{
+  "id":{"type":"string","minLength":1},"skill_id":{"type":"string"},"skill_version":{"type":"string"},
+  "mode":{"enum":["historical_replay","shadow","supervised","live"]},
+  "status":{"enum":["draft","configuring","ready","trial_replay","trial_shadow","awaiting_activation","active","waiting_approval","waiting_external","paused","retrying","reconciliation_required","completed","failed","cancel_requested","cancelled"]},
+  "risk_tier":{"enum":["low","medium","high","regulated"]},
+  "policy_version":{"type":"integer","minimum":1},"version":{"type":"integer","minimum":1},
+  "budget":{"type":"object","required":["currency","monthly_limit"],"properties":{"currency":{"type":"string"},"monthly_limit":{"type":"number","minimum":0},"per_action_limit":{"type":"number","minimum":0}}},
+  "source_connections":{"type":"array","items":{"type":"string"},"uniqueItems":true},
+  "created_at":{"type":"string","format":"date-time"},"tenant_id":{"type":"string"}
+ }
+}

@@ -1,0 +1,51 @@
+id: gluons.commerce_business_launch
+version: 0.1.0
+status: specification_only
+kind: meta_playbook
+owner: gluons
+trigger: owner_goal
+runtime: durable
+requires:
+  - gluons_authenticated_user
+  - selected_organization
+  - explicit_action_grants
+stages:
+  - market_research
+  - owner_plan_approval
+  - shopify_signup_or_partner_transfer
+  - verify_store_connection
+  - draft_storefront_and_catalog
+  - source_suppliers_and_compare
+  - owner_approved_supplier_outreach
+  - negotiate_within_bounds
+  - verify_payment_eligibility_and_merchant_kyc
+  - verify_tax_shipping_checkout
+  - owner_go_live_approval
+  - publish_catalog
+  - monitor_orders_and_fulfillment
+  - reconcile_customer_notifications_and_costs
+approval_required:
+  - store_plan_and_billing
+  - supplier_first_contact
+  - supplier_contract_or_purchase
+  - live_publication
+  - financial_or_legal_verification
+  - exception_refund
+external_integrations:
+  - shopify
+  - eligible_payment_provider
+  - supplier_email_or_messaging
+  - selected_shipping_and_inventory_provider
+  - analytics
+trial_modes:
+  - research_only
+  - store_sandbox
+  - sandbox_checkout
+  - supervised_live
+metrics:
+  - owner_interventions
+  - time_to_test_checkout
+  - supplier_response_rate
+  - operational_error_rate
+  - verified_order_fulfillment_rate
+  - gross_profit_after_direct_costs

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gluons.example/schemas/automation_permission.schema.json",
+  "title": "Gluons owner-authorized automation policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_id", "tenant_id", "automation_id", "connection_ids", "mode", "allowed_actions", "approved_by", "policy_version"],
+  "properties": {
+    "policy_id": {"type": "string", "minLength": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "automation_id": {"type": "string", "minLength": 1},
+    "connection_ids": {"type": "array", "items": {"type": "string"}},
+    "mode": {"enum": ["draft", "replay", "shadow", "supervised", "active", "paused", "revoked"]},
+    "allowed_actions": {"type": "array", "items": {"type": "string", "enum": ["read", "draft", "send", "call", "create_order", "submit_order", "refund", "purchase", "modify_inventory", "publish", "cancel", "schedule"]}, "uniqueItems": true},
+    "resource_filters": {"type": "object"},
+    "spend_limit_minor_per_month": {"type": ["integer", "null"], "minimum": 0},
+    "currency": {"type": "string", "minLength": 3, "maxLength": 3},
+    "requires_approval_for": {"type": "array", "items": {"type": "string"}},
+    "approved_by": {"type": "string", "minLength": 1},
+    "approved_at": {"type": ["string", "null"], "format": "date-time"},
+    "policy_version": {"type": "integer", "minimum": 1}
+  },
+  "description": "Requires distinct explicit owner action authorization, even when provider OAuth connection already exists. Runtime policy checks must occur outside the LLM."
+}

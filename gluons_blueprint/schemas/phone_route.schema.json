@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gluons.example/schemas/phone_route.schema.json",
+  "title": "Gluons inbound call route status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["route_id", "tenant_id", "number", "route_mode", "state", "ownership_verified", "test_call_verified"],
+  "properties": {
+    "route_id": {"type": "string", "minLength": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "number": {"type": "string", "minLength": 4},
+    "route_mode": {"enum": ["new_twilio_number", "carrier_forwarding", "sip_pbx"]},
+    "state": {"enum": ["not_configured", "number_reserved", "agent_configured", "routing_pending", "test_pending", "verified", "active", "routing_failed", "needs_manual_carrier_step"]},
+    "ownership_verified": {"type": "boolean"},
+    "test_call_verified": {"type": "boolean"},
+    "test_call_id": {"type": ["string", "null"]},
+    "routing_instructions": {"type": ["string", "null"]}
+  },
+  "description": "Never mark a phone route active solely on the strength of in-chat approval. Requires number routing and verified inbound call."
+}

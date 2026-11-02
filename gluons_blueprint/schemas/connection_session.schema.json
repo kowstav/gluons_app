@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gluons.example/schemas/connection_session.schema.json",
+  "title": "Gluons external account authorization session public response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "provider", "status", "expires_at", "authorization_url"],
+  "properties": {
+    "session_id": {"type": "string", "minLength": 8},
+    "provider": {"type": "string", "enum": ["gmail", "whatsapp_business", "erpnext", "shopify", "other"]},
+    "status": {"type": "string", "enum": ["requires_external_authorization", "pending", "connected", "needs_additional_permission", "denied", "expired", "failed"]},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "authorization_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+    "account_display": {"type": ["string", "null"]},
+    "requested_capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "next_step": {"type": ["string", "null"]}
+  },
+  "description": "Return an opaque authorization session and a Gluons-owned HTTPS setup URL. Never return provider codes, access tokens or refresh tokens. URLs must not contain bearer tokens."
+}

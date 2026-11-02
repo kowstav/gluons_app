@@ -1,0 +1,281 @@
+[
+  {
+    "id": "multichannel_order_entry",
+    "industry": "Food distribution",
+    "reference": "Asakana",
+    "domain": "orders",
+    "risk": "medium",
+    "trigger": "Customer message, voice transcript, or scanned order sheet",
+    "output": "ERP order draft, customer confirmation after approval"
+  },
+  {
+    "id": "restaurant_inventory_planning",
+    "industry": "Restaurants",
+    "reference": "Marble",
+    "domain": "inventory",
+    "risk": "high",
+    "trigger": "Daily forecast schedule or new stock/sales/invoice data",
+    "output": "Inventory snapshot, suggested PO, prep plan and staffing forecast"
+  },
+  {
+    "id": "restaurant_voice_ordering",
+    "industry": "Restaurants",
+    "reference": "Certus AI",
+    "domain": "voice",
+    "risk": "high",
+    "trigger": "Inbound restaurant phone call",
+    "output": "Verified POS order or reservation and call outcome"
+  },
+  {
+    "id": "property_maintenance",
+    "industry": "Property management",
+    "reference": "Brickwise",
+    "domain": "maintenance",
+    "risk": "high",
+    "trigger": "Tenant phone, message, email or maintenance portal request",
+    "output": "Resolved ticket, contractor evidence and approved invoice"
+  },
+  {
+    "id": "freight_order_to_cash",
+    "industry": "Transportation",
+    "reference": "Lunavo",
+    "domain": "logistics",
+    "risk": "high",
+    "trigger": "Freight order email, EDI, PDF or portal event",
+    "output": "TMS job, customer updates, POD and draft invoice"
+  },
+  {
+    "id": "title_closing_support",
+    "industry": "Real estate title",
+    "reference": "Vestris",
+    "domain": "documents",
+    "risk": "regulated",
+    "trigger": "New purchase contract or settlement email",
+    "output": "Draft title file, discrepancies and review-ready closing documents"
+  },
+  {
+    "id": "workflow_discovery",
+    "industry": "Horizontal operations",
+    "reference": "Cofia",
+    "domain": "discovery",
+    "risk": "high",
+    "trigger": "Consented local event observation, uploaded process log or workflow interview",
+    "output": "Suggested automations with evidence, consent and sandbox evaluation"
+  },
+  {
+    "id": "ecommerce_returns",
+    "industry": "E-commerce",
+    "reference": "Pango",
+    "domain": "fulfillment",
+    "risk": "high",
+    "trigger": "Return request, delivery exception or support ticket",
+    "output": "Verified RMA, exchange, refund and inventory update"
+  },
+  {
+    "id": "shopping_guidance",
+    "industry": "E-commerce",
+    "reference": "Kinect",
+    "domain": "sales",
+    "risk": "medium",
+    "trigger": "Shopper inquiry or catalog/product-page interaction",
+    "output": "Grounded recommendation and storefront guidance; checkout stays with store"
+  },
+  {
+    "id": "local_creator_campaigns",
+    "industry": "Local marketing",
+    "reference": "TryNearby",
+    "domain": "marketing",
+    "risk": "medium",
+    "trigger": "Business approves creator campaign plan",
+    "output": "Booked creator visits, published campaign links and transparent report"
+  },
+  {
+    "id": "field_service_opportunity_detection",
+    "industry": "Home services",
+    "reference": "Robby",
+    "domain": "sales",
+    "risk": "medium",
+    "trigger": "Technician visit closes or service history updates",
+    "output": "Qualified follow-on opportunity and owner-approved follow-up"
+  },
+  {
+    "id": "field_inspection_reports",
+    "industry": "Construction",
+    "reference": "Opusense AI",
+    "domain": "documents",
+    "risk": "medium",
+    "trigger": "Inspector captures voice observations and photos",
+    "output": "Structured inspection report with linked evidence"
+  },
+  {
+    "id": "construction_estimates",
+    "industry": "Construction",
+    "reference": "FlowManual",
+    "domain": "documents",
+    "risk": "high",
+    "trigger": "Bid invitation and drawings/specification upload",
+    "output": "Traceable quantity takeoff, estimate and bid draft"
+  },
+  {
+    "id": "property_valuation_reports",
+    "industry": "Real estate",
+    "reference": "Automax.ai",
+    "domain": "documents",
+    "risk": "regulated",
+    "trigger": "Authorized property inspection and valuation order",
+    "output": "Draft appraisal with comparables and appraiser approval"
+  },
+  {
+    "id": "bookkeeping_reconciliation",
+    "industry": "Accounting",
+    "reference": "Balance",
+    "domain": "finance",
+    "risk": "regulated",
+    "trigger": "New bank transaction or scheduled close",
+    "output": "Reconciled draft ledger, anomalies and review pack"
+  },
+  {
+    "id": "tax_return_preparation",
+    "industry": "Accounting and tax",
+    "reference": "Cranston AI",
+    "domain": "finance",
+    "risk": "regulated",
+    "trigger": "Client tax document upload and engagement confirmation",
+    "output": "Draft return and workpapers for CPA review"
+  },
+  {
+    "id": "accounting_practice_operations",
+    "industry": "Accounting firms",
+    "reference": "Combinely",
+    "domain": "finance",
+    "risk": "regulated",
+    "trigger": "Accountant selects workflow or scheduled close begins",
+    "output": "Review-ready bookkeeping, VAT, payroll or reconciliation output"
+  },
+  {
+    "id": "legal_matter_intake",
+    "industry": "Legal",
+    "reference": "Praxis",
+    "domain": "legal",
+    "risk": "regulated",
+    "trigger": "New prospective client contact",
+    "output": "Conflict-check packet, intake form and draft engagement record"
+  },
+  {
+    "id": "commercial_insurance_submission",
+    "industry": "Insurance",
+    "reference": "Casey",
+    "domain": "insurance",
+    "risk": "regulated",
+    "trigger": "Broker receives client risk information or renewal packet",
+    "output": "Carrier-specific draft submission and discrepancy list"
+  },
+  {
+    "id": "candidate_screening",
+    "industry": "Recruitment",
+    "reference": "Asendia AI",
+    "domain": "recruiting",
+    "risk": "high",
+    "trigger": "Approved open role or candidate applies",
+    "output": "Structured candidate assessment and scheduled recruiter handoff"
+  },
+  {
+    "id": "dental_reception_and_claims",
+    "industry": "Healthcare administration",
+    "reference": "Patientdesk.ai",
+    "domain": "health",
+    "risk": "regulated",
+    "trigger": "Inbound patient call, appointment event or eligible claim follow-up",
+    "output": "Booked appointment or claim-workflow packet with authorized review"
+  },
+  {
+    "id": "hardware_procurement",
+    "industry": "Hardware procurement",
+    "reference": "Waybill",
+    "domain": "procurement",
+    "risk": "high",
+    "trigger": "Approved BOM or requisition",
+    "output": "Sourced supplier quotes, approved PO and shipment tracking"
+  },
+  {
+    "id": "website_organic_growth",
+    "industry": "Small-business marketing",
+    "reference": "Theo",
+    "domain": "marketing",
+    "risk": "medium",
+    "trigger": "New domain connection or scheduled SEO review",
+    "output": "Approved website improvements and measured organic-search reports"
+  },
+  {
+    "id": "lead_research_and_outreach",
+    "industry": "B2B sales",
+    "reference": "LemonLime",
+    "domain": "sales",
+    "risk": "medium",
+    "trigger": "Owner-approved ICP and sales campaign",
+    "output": "Verified lead list, outreach drafts and CRM outcomes"
+  },
+  {
+    "id": "crm_reactivation_and_hygiene",
+    "industry": "Revenue operations",
+    "reference": "Nex",
+    "domain": "sales",
+    "risk": "medium",
+    "trigger": "Owner requests CRM cleanup or scheduled stale-lead scan",
+    "output": "Deduplicated CRM and approved reactivation workflow"
+  },
+  {
+    "id": "paid_ad_campaign_operations",
+    "industry": "Marketing",
+    "reference": "Uplane",
+    "domain": "marketing",
+    "risk": "high",
+    "trigger": "Approved campaign objective and spend allocation",
+    "output": "Ad creative drafts, approved campaigns, ROI reporting"
+  },
+  {
+    "id": "social_media_operations",
+    "industry": "Creator marketing",
+    "reference": "Tell if AI",
+    "domain": "marketing",
+    "risk": "high",
+    "trigger": "Approved content strategy and posting calendar",
+    "output": "Reviewable content, authorized posts and audience report"
+  },
+  {
+    "id": "abandoned_cart_retention",
+    "industry": "E-commerce",
+    "reference": "Boom AI",
+    "domain": "sales",
+    "risk": "medium",
+    "trigger": "Abandoned cart, elapsed timer or customer retention eligibility",
+    "output": "Consented reminder, reply handling and attributed completed order"
+  },
+  {
+    "id": "outbound_shipping_management",
+    "industry": "E-commerce",
+    "reference": "Pango",
+    "domain": "fulfillment",
+    "risk": "high",
+    "trigger": "Paid order ready for fulfillment",
+    "output": "Carrier label, tracking, delivery event and customer notification"
+  },
+  {
+    "id": "custom_legacy_workflow",
+    "industry": "General SMB operations",
+    "reference": "Async",
+    "domain": "custom",
+    "risk": "high",
+    "trigger": "Owner explains repetitive process and supplies examples",
+    "output": "Tested, versioned custom automation with approval controls"
+  },
+  {
+    "id": "home_service_dispatch",
+    "industry": "Home services",
+    "reference": "Fleety",
+    "domain": "dispatch",
+    "risk": "high",
+    "trigger": "New HVAC/plumbing job or schedule change",
+    "output": "Recommended or approved technician assignment with status events"
+  }
+]

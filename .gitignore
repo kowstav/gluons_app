@@ -1,0 +1,54 @@
+# Secrets: never commit. Use .env.example as the template.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+**/service-account*.json
+**/*credentials*.json
+.secrets/
+.gluons-vault/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+playwright-report/
+test-results/
+
+# Local databases and runtime data
+.pgdata/
+.gluons-data/
+*.sqlite
+*.db
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

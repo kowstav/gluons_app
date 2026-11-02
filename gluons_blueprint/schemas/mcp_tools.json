@@ -1,0 +1,18 @@
+{
+ "note":"Conceptual MCP tool surface; implement with official SDK and host capability negotiation. Do not expose API tokens in responses.",
+ "tools":[
+  {"name":"discover_automations","effect":"read","args":{"business_goal":"string","industry":"optional string"}},
+  {"name":"inspect_automation","effect":"read","args":{"skill_id":"string"}},
+  {"name":"create_plan","effect":"draft","args":{"skill_id":"string","mode":"enum","business_context":"object"}},
+  {"name":"start_trial","effect":"write","args":{"plan_id":"string","approval_token":"string","idempotency_key":"string"}},
+  {"name":"activate_automation","effect":"write","args":{"automation_id":"string","expected_version":"integer","approval_token":"string","idempotency_key":"string"}},
+  {"name":"get_task_status","effect":"read","args":{"task_id":"string"}},
+  {"name":"pause_task","effect":"write","args":{"task_id":"string","expected_version":"integer","idempotency_key":"string"}},
+  {"name":"cancel_task","effect":"write","args":{"task_id":"string","expected_version":"integer","idempotency_key":"string"}},
+  {"name":"approve_action","effect":"write","args":{"approval_id":"string","decision":"approve|deny","signed_owner_action":"string","idempotency_key":"string"}},
+  {"name":"get_trial_report","effect":"read","args":{"trial_id":"string"}},
+  {"name":"get_spending","effect":"read","args":{"period":"string"}},
+  {"name":"list_connections","effect":"read","args":{}},
+  {"name":"connect_service","effect":"auth_redirect","args":{"provider":"string","requested_scopes":"string[]"}}
+ ]
+}
