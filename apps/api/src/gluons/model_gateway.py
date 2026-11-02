@@ -99,6 +99,12 @@ def _cost(model: ModelDescriptor, usage: dict[str, int]) -> Decimal:
             + Decimal(outgoing) * model.output_usd_per_mtok) / Decimal(1_000_000)
 
 
+def reservation(model: ModelDescriptor, input_bound: int, output_limit: int) -> Decimal:
+    """Worst-case price of one call, held before it starts so concurrent calls cannot overspend."""
+    rate = max(model.input_usd_per_mtok, model.cache_write_usd_per_mtok or Decimal(0))
+    return (Decimal(input_bound) * rate + Decimal(output_limit) * model.output_usd_per_mtok) / Decimal(1_000_000)
+
+
 def complete_structured(*, tenant_id: str, purpose: str, schema: type[BaseModel], system: str, user: str,
                         automation_id: str | None = None, run_id: str | None = None, step_id: str | None = None,
                         skill_id: str | None = None, model_policy: dict[str, Any] | None = None,
@@ -127,8 +133,7 @@ def complete_structured(*, tenant_id: str, purpose: str, schema: type[BaseModel]
         if model.context_limit is not None and input_bound + output_limit > model.context_limit:
             attempts.append({"provider": model.provider, "model_id": model.model_id, "status": "context_limit"})
             continue
-        rate = max(model.input_usd_per_mtok, model.cache_write_usd_per_mtok or Decimal(0))
-        estimate = (Decimal(input_bound) * rate + Decimal(output_limit) * model.output_usd_per_mtok) / Decimal(1_000_000)
+        estimate = reservation(model, input_bound, output_limit)
         with tenant_tx(tenant_id) as session:
             hold_id = billing.place_hold(session, tenant_id, automation_id, estimate, run_id)
         started, attempt_id = time.monotonic(), new_id("inf")

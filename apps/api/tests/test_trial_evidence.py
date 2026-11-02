@@ -10,7 +10,7 @@ from sqlalchemy import update
 from gluons import billing, trials
 from gluons.api.app import create_app
 from gluons.core import GluonsError, new_id, utcnow
-from gluons.db.models import ActionReceipt, Run, Trial
+from gluons.db.models import ActionReceipt, Trial
 from gluons.db.session import tenant_tx
 from gluons.runtime import lifecycle, worker
 from helpers import World, drain, order_event
@@ -329,6 +329,4 @@ def test_trial_routes_over_http(world):
                               json={"metric": "correction", "value": 0, "unit": "case", "basis": "measured", "source": "Reviewer log"})
     assert measurement.status_code == 201
     assert client.get(f"/v1/trials/{trial_id}/results").json()["passed"] is False
-    with tenant_tx(world.tenant_id) as session:
-        assert session.get(Run, "absent") is None
     assert [t["id"] for t in client.get("/v1/trials").json()["trials"]] == [trial_id]
