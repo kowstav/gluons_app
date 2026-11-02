@@ -1,5 +1,6 @@
 """Knowledge, trials, and evidence-based reports for owner and supported assistants."""
 from __future__ import annotations
+from typing import Literal
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
@@ -15,6 +16,7 @@ class DocumentBody(BaseModel):
     body: str = Field(min_length=1, max_length=100_000)
     kind: str = Field(default="note", min_length=1, max_length=40)
     source: str | None = Field(default=None, max_length=2000)
+    audience: list[Literal["voice"]] = Field(default_factory=list, max_length=1)
 
 
 @router.get("/knowledge/documents")

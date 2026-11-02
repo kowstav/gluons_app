@@ -1020,6 +1020,7 @@ class ChannelMessage(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="received")
     classification: Mapped[str | None] = mapped_column(String(60))
     attachments: Mapped[list] = _json("[]")
+    metadata_json: Mapped[dict] = _json()
     provider_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
     __table_args__ = (UniqueConstraint("tenant_id", "channel", "external_message_id", name="uq_channel_message"),)

@@ -141,7 +141,7 @@ def _sign_decision(approval: Approval, user_id: str, decision: str, decided_at: 
 
 def _check_authority(principal: Principal, approval: Approval) -> None:
     principal.require("approvals:decide")
-    if (approval.action or "").startswith("business_launch.") and principal.kind != "user":
+    if ((approval.action or "").startswith("business_launch.") or approval.action in ("commerce.supplier.inquiry", "shopify.product.publish", "shopify.fulfillment.create")) and principal.kind != "user":
         raise forbidden("Business launch decisions require the owner in Gluons Web.")
     role = principal.role
     if role is None or role not in ROLE_RANK:

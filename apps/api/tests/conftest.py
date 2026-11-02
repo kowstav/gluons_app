@@ -23,7 +23,7 @@ TEST_DATA = Path(tempfile.mkdtemp(prefix="gluons-test-"))
 def database():
     from gluons import devdb
 
-    db = devdb.start(REPO_ROOT / ".pgdata" / "test", database=f"gluons_test_{os.getpid()}")
+    db = devdb.start(REPO_ROOT / ".pgdata" / os.environ.get("GLUONS_TEST_CLUSTER", "test"), database=f"gluons_test_{os.getpid()}")
     os.environ.update(db.environment())
     os.environ["GLUONS_ENV"] = "test"
     os.environ["GLUONS_MAIL_DIR"] = str(TEST_DATA / "mail")

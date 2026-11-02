@@ -1,4 +1,11 @@
 .git
+.claude
+.codex
+.agents
+.aws
+.tools
+.secrets
+.gluons-vault
 .venv
 .env
 .env.*

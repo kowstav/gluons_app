@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from gluons import audit
-from gluons.authz import Principal
+from gluons.authz import Principal, Role
 from gluons.core import conflict, fingerprint, not_found, utcnow
 from gluons.db.models import ActionReceipt, Automation, Run, Trial
 from gluons.db.session import tenant_tx
@@ -42,29 +42,42 @@ def _report(session, trial: Trial) -> dict:
 
 def get_report(principal: Principal, trial_id: str) -> dict:
     principal.require("trials:read")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         trial = session.get(Trial, trial_id)
         if trial is None:
+            raise not_found("Trial")
+        if principal.role == Role.FIELD_REP and trial.created_by != principal.user_id:
             raise not_found("Trial")
         return trial.results if trial.status == "completed" else _report(session, trial)
 
 
 def list_all(principal: Principal) -> list[dict]:
     principal.require("trials:read")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        query = select(Trial).order_by(Trial.created_at.desc()).limit(200)
+        if principal.role == Role.FIELD_REP:
+            query = query.where(Trial.created_by == principal.user_id)
         return [{"id": t.id, "automation_id": t.automation_id, "mode": t.mode, "status": t.status,
-                 "created_at": t.created_at.isoformat()} for t in session.execute(select(Trial).order_by(Trial.created_at.desc()).limit(200)).scalars()]
+                 "created_at": t.created_at.isoformat()} for t in session.execute(query).scalars()]
 
 
 def complete(principal: Principal, trial_id: str) -> dict:
     principal.require("trials:write")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         trial = session.get(Trial, trial_id, with_for_update=True)
         if trial is None:
             raise not_found("Trial")
+        automation = session.get(Automation, trial.automation_id, with_for_update=True)
+        if principal.role == Role.FIELD_REP and (trial.created_by != principal.user_id or automation.created_by != principal.user_id):
+            raise not_found("Trial")
         if trial.status == "completed":
             return trial.results
-        automation = session.get(Automation, trial.automation_id, with_for_update=True)
         if automation.status not in ("trial_shadow", "trial_replay"):
             raise conflict("Only an active trial can be completed.")
         report = _report(session, trial)

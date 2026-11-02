@@ -205,7 +205,7 @@ def route_secret(row: PhoneRoute) -> str:
 def record_provider_cost(session, route: PhoneRoute, call: Call, metadata: dict[str, Any]) -> None:  # type: ignore[no-untyped-def]
     # `cost` has undocumented units. Only a provider's explicit cost_fiat USD
     # field can become measured monetary usage. Telecom charges remain separate.
-    raw = metadata.get("cost_fiat")
+    raw = metadata.get("cost_fiat") if metadata.get("cost_currency") == "USD" else None
     if raw is None:
         return
     try:

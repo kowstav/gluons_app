@@ -91,7 +91,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
     Role.OPERATOR: READ_PERMISSIONS | {"plans:write", "automations:write", "tasks:control", "knowledge:write", "trials:write"},
     Role.VIEWER: READ_PERMISSIONS | {"audit:read", "billing:read"},
     Role.FIELD_REP: frozenset(
-        {"org:read", "skills:read", "connections:read", "plans:read", "plans:write", "trials:read", "trials:write", "assist:use"}
+        {"org:read", "skills:read", "connections:read", "plans:read", "plans:write", "automations:write", "trials:read", "trials:write", "assist:use"}
     ),
     Role.SUPPORT: frozenset({"org:read", "skills:read", "tasks:read", "reports:read"}),
 }

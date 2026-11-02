@@ -66,6 +66,23 @@ def response(provider, *, content='{"value": 42}', finished=True):
             "usage": {"prompt_tokens": 100, "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": 50}}}
 
 
+def test_caller_data_provider_restriction_cannot_be_broadened_by_stored_policy(world, configured):
+    from gluons.db.models import Automation
+    automation = world.order_automation()
+    model = register(automation["skill_id"], "openai")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Automation, automation["id"]).model_policy = {"provider": "openai", "model_id": model, "allowed_providers": ["openai"]}
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json=response("openai"))
+    with pytest.raises(GluonsError, match="No configured, permitted model"):
+        model_gateway.complete_structured(tenant_id=world.tenant_id, purpose=automation["skill_id"], schema=Answer,
+            system="Extract", user="Private input", automation_id=automation["id"],
+            model_policy={"allowed_providers": ["private"]}, transport=httpx.MockTransport(handler))
+    assert calls == []
+
+
 @pytest.mark.parametrize("provider", ["openai", "anthropic", "google", "private"])
 def test_documented_provider_shapes_and_cache_usage(configured, provider):
     requests = []

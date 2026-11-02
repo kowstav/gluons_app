@@ -104,7 +104,11 @@ def complete_structured(*, tenant_id: str, purpose: str, schema: type[BaseModel]
                 raise not_found("Automation")
             # Stored selection is authoritative. Caller policy may narrow the
             # provider set but cannot replace an explicitly selected model.
-            policy = {**policy, **automation.model_policy}
+            caller_policy = policy
+            policy = {**caller_policy, **automation.model_policy}
+            restrictions = [set(p["allowed_providers"]) for p in (caller_policy, automation.model_policy) if "allowed_providers" in p]
+            if restrictions:
+                policy["allowed_providers"] = sorted(set.intersection(*restrictions))
     candidates = _candidates(tenant_id, skill, policy)
     if not candidates:
         raise GluonsError("MODEL_UNAVAILABLE", "No configured, permitted model has passing evaluation evidence for this skill.")
