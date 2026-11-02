@@ -147,6 +147,18 @@ def get_session(principal: Principal, session_id: str) -> dict[str, Any]:
         return _view(_load(session, principal, session_id))
 
 
+def require_active(principal: Principal) -> None:
+    """Outside a consented session a representative holds no trial authority at all."""
+    if principal.role != Role.FIELD_REP:
+        return
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        found = session.scalar(select(AssistSession.id).where(
+            AssistSession.rep_user_id == principal.user_id, AssistSession.status == "active",
+            AssistSession.owner_consent_at.is_not(None), AssistSession.expires_at > utcnow()).limit(1))
+    if found is None:
+        raise GluonsError("ASSIST_CONSENT_REQUIRED", "The owner must consent to an active assist session first.", status=403)
+
+
 def _require_consented(row: AssistSession) -> None:
     if row.status != "active" or row.owner_consent_at is None:
         raise GluonsError("ASSIST_CONSENT_REQUIRED", "The owner must consent to this session first.", status=403)

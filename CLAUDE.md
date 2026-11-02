@@ -9,6 +9,11 @@ Gluons lets an owner run real business automations from ChatGPT, Claude or Gluon
 
 Resume work from: `docs/IMPLEMENTATION_STATUS.md`, `docs/BLUEPRINT_TRACEABILITY.md`, `docs/EXTERNAL_DEPENDENCIES.md`, `docs/TEST_RESULTS.md`, `docs/DEPLOYMENT_STATUS.md`.
 
+Local startup: `.venv/Scripts/python.exe scripts/dev.py` after installing API extras
+and `npm ci --prefix apps/web`. See root README. Worker authority uses explicit RLS
+policies after migration 0007; legacy BYPASSRLS references below are superseded by
+ADR-022. Never run cloud apply or paid provider actions without owner approval.
+
 ## Layout
 - `apps/api/src/gluons/`: FastAPI modular monolith, worker, MCP server.
 - `apps/web/`: Next.js owner app. Talks only to the real API.

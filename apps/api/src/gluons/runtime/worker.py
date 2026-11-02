@@ -45,6 +45,30 @@ def _run_advance(job: Job, worker_id: str) -> None:
         return
 
 
+@handler("gmail.sync")
+def _gmail_sync(job: Job, worker_id: str) -> None:
+    from gluons.connections.gmail_sync import sync_connection
+    sync_connection(job.tenant_id, job.payload["connection_id"])
+
+
+@handler("gmail.ingest")
+def _gmail_ingest(job: Job, worker_id: str) -> None:
+    from gluons.connections.gmail_sync import ingest_message
+    ingest_message(job.tenant_id, job.payload["connection_id"], job.payload["message_id"])
+
+
+@handler("gmail.maintain")
+def _gmail_maintain(job: Job, worker_id: str) -> None:
+    from gluons.connections.gmail_sync import maintain
+    maintain()
+
+
+@handler("whatsapp.process")
+def _whatsapp_process(job: Job, worker_id: str) -> None:
+    from gluons.whatsapp.service import process_event
+    process_event(job.tenant_id, job.payload["inbox_id"])
+
+
 @handler("automation.finalize_cancel")
 def _finalize_cancel(job: Job, worker_id: str) -> None:
     if not lifecycle.finalize_cancel(job.tenant_id, job.payload["automation_id"]):
@@ -179,7 +203,7 @@ def drain(worker_id: str = "drain", *, max_rounds: int = 100) -> int:
     return total
 
 
-PERIODIC: dict[str, int] = {"approvals.expire": 60, "reconcile.sweep": 300, "outbox.publish": 15}
+PERIODIC: dict[str, int] = {"approvals.expire": 60, "reconcile.sweep": 300, "outbox.publish": 15, "gmail.maintain": 300}
 
 
 def scheduler_tick() -> None:

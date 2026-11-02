@@ -207,6 +207,15 @@ def get_credential(session: Any, tenant_id: str, connection: Connection) -> dict
 
 def verify_connection(principal: Principal, connection_id: str) -> dict:
     principal.require("connections:manage")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        provider_row = session.get(Connection, connection_id)
+        provider_name = provider_row.provider if provider_row else None
+    if provider_name == "whatsapp_business":
+        from gluons.whatsapp.service import verify_connection as verify_whatsapp
+        return verify_whatsapp(principal, connection_id)
+    if provider_name == "shopify":
+        from gluons.commerce.service import verify_connection as verify_shopify
+        return verify_shopify(principal, connection_id)
     failure = None
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         row = session.get(Connection, connection_id, with_for_update=True)

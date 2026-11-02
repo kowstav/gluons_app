@@ -451,6 +451,12 @@ def _connector_context(request: ActionRequest) -> ConnectorContext:
                 except GluonsError as exc:
                     kind = "retryable" if exc.code == "EXTERNAL_UNAVAILABLE" else "auth"
                     raise ProviderError(kind, exc.message) from exc
+            if current.provider == "shopify":
+                from gluons.commerce.shopify import get_credential
+                try:
+                    return get_credential(session, request.tenant_id, current)
+                except GluonsError as exc:
+                    raise ProviderError("auth", exc.message) from exc
             return vault.read(session, request.tenant_id, current.credential_ref)
 
     return ConnectorContext(

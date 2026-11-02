@@ -34,6 +34,10 @@ class HostNotAllowed(RuntimeError):
     """A connector tried to reach a host outside its allowlist."""
 
 
+class ResponseTooLarge(RuntimeError):
+    """A provider response exceeded its declared byte budget while streaming."""
+
+
 @contextmanager
 def write_permit(reason: str) -> Iterator[None]:
     token = _write_permit.set(reason)
@@ -96,6 +100,19 @@ class GuardedClient:
 
     def get(self, url: str, **kwargs: Any) -> httpx.Response:
         return self.request("GET", url, **kwargs)
+
+    def get_bytes(self, url: str, *, max_bytes: int, **kwargs: Any) -> tuple[bytes, dict[str, str], int]:
+        """Bound decoded response bytes before buffering a document or media file."""
+        if not 1 <= max_bytes <= 64 * 1024 * 1024:
+            raise ValueError("response budget must be between 1 byte and 64 MiB")
+        self._check_host(url)
+        with self._client.stream("GET", url, **kwargs) as response:
+            data = bytearray()
+            for chunk in response.iter_bytes():
+                if len(data) + len(chunk) > max_bytes:
+                    raise ResponseTooLarge("Provider response exceeds the permitted size.")
+                data.extend(chunk)
+            return bytes(data), dict(response.headers), response.status_code
 
     def post(self, url: str, *, read_only: bool = False, **kwargs: Any) -> httpx.Response:
         return self.request("POST", url, read_only=read_only, **kwargs)

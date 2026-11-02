@@ -50,5 +50,9 @@ crash.log
 # Editors / OS
 .vscode/
 .idea/
+.tools/
 .DS_Store
 Thumbs.db
+
+# Agent worktrees are local checkouts, never repository content
+.claude/worktrees/

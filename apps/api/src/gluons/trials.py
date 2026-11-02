@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 
 from gluons import audit, events
-from gluons.authz import Principal
-from gluons.core import conflict, new_id, not_found, utcnow, validation_failed
+from gluons.authz import Principal, Role
+from gluons.core import conflict, forbidden, new_id, not_found, utcnow, validation_failed
 from gluons.db.models import ActionReceipt, Approval, Automation, Run, Trial, TrialMeasurement, UsageEvent
 from gluons.db.session import tenant_tx
 from gluons.policy import NON_LIVE_MODES
@@ -293,22 +293,36 @@ def _report(session: Any, trial: Trial, *, now: datetime | None = None) -> dict[
     }
 
 
+def _guard_rep(principal: Principal, trial: Trial) -> None:
+    """A consented session never opens the owner's own trials to a representative."""
+    if principal.role == Role.FIELD_REP and trial.created_by != principal.user_id:
+        raise not_found("Trial")
+
+
 def get_report(principal: Principal, trial_id: str) -> dict[str, Any]:
     principal.require("trials:read")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         trial = session.get(Trial, trial_id)
         if trial is None:
             raise not_found("Trial")
+        _guard_rep(principal, trial)
         return trial.results if trial.status in ("completed", "expired") else _report(session, trial)
 
 
 def list_all(principal: Principal) -> list[dict[str, Any]]:
     principal.require("trials:read")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        query = select(Trial).order_by(Trial.created_at.desc()).limit(200)
+        if principal.role == Role.FIELD_REP:
+            query = query.where(Trial.created_by == principal.user_id)
         return [{"id": t.id, "automation_id": t.automation_id, "mode": t.mode, "status": t.status,
                  "passed": t.results.get("passed") if t.results else None,
                  "expires_at": t.expires_at.isoformat() if t.expires_at else None, "created_at": t.created_at.isoformat()}
-                for t in session.execute(select(Trial).order_by(Trial.created_at.desc()).limit(200)).scalars()]
+                for t in session.execute(query).scalars()]
 
 
 def _expiry(days: int | None) -> datetime | None:
@@ -324,6 +338,8 @@ def configure(principal: Principal, trial_id: str, *, pass_criteria: dict[str, A
               expires_in_days: int | None = None) -> dict[str, Any]:
     """Criteria and baseline are fixed before the first run. Labels may arrive later, and that is audited."""
     principal.require("trials:write")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         trial = session.get(Trial, trial_id, with_for_update=True)
         if trial is None:
@@ -355,6 +371,8 @@ def start_supervised(principal: Principal, automation_id: str, expected_version:
                      expires_in_days: int | None = None) -> dict[str, Any]:
     """Measures live operation under per-action approval. The signed policy is what permits it."""
     principal.require("trials:write")
+    if principal.role == Role.FIELD_REP:
+        raise forbidden("A representative cannot measure live operation.")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         automation = session.get(Automation, automation_id, with_for_update=True)
         if automation is None:
@@ -375,6 +393,8 @@ def record_measurement(principal: Principal, trial_id: str, *, metric: str, valu
                        source: str, run_id: str | None = None) -> dict[str, Any]:
     """Keeps a person's time study or correction count with its basis, so bases never blur."""
     principal.require("trials:write")
+    from gluons.assist import require_active
+    require_active(principal)
     if basis not in BASES:
         raise validation_failed("Basis must be measured, estimated or unverified.")
     amount = Decimal(str(value))
@@ -384,6 +404,7 @@ def record_measurement(principal: Principal, trial_id: str, *, metric: str, valu
         trial = session.get(Trial, trial_id, with_for_update=True)
         if trial is None:
             raise not_found("Trial")
+        _guard_rep(principal, trial)
         if trial.status != "running":
             raise conflict("A finished trial cannot change.")
         if run_id is not None and session.get(Run, run_id) is None:
@@ -410,10 +431,13 @@ def _close(session: Any, trial: Trial, automation: Automation, status: str, now:
 
 def complete(principal: Principal, trial_id: str) -> dict[str, Any]:
     principal.require("trials:write")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         trial = session.get(Trial, trial_id, with_for_update=True)
         if trial is None:
             raise not_found("Trial")
+        _guard_rep(principal, trial)
         if trial.status in ("completed", "expired"):
             return trial.results
         automation = session.get(Automation, trial.automation_id, with_for_update=True)

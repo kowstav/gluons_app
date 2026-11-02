@@ -150,7 +150,8 @@ def _check_authority(principal: Principal, approval: Approval, decision: str = "
     # Refusing can only stop an action, so tier limits and the web-only rule guard approval alone.
     if decision == "deny":
         return
-    if (approval.action or "").startswith("business_launch.") and principal.kind != "user":
+    if ((approval.action or "").startswith("business_launch.")
+            or approval.action in ("commerce.supplier.inquiry", "shopify.product.publish", "shopify.fulfillment.create")) and principal.kind != "user":
         raise forbidden("Business launch decisions require the owner in Gluons Web.")
     if principal.approval_tier_limit and not risk_at_most(approval.risk_tier, principal.approval_tier_limit):
         raise forbidden("This is above your approval limit.")

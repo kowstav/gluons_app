@@ -1,88 +1,725 @@
-# Requirement matrix. Source for docs/BLUEPRINT_TRACEABILITY.md (see scripts/check_traceability.py).
-# status: done | partial | blocked | not_started
-# 'done' must cite at least one existing test. 'blocked' must name what it is blocked by.
-# 'done' means implemented and tested here. Live provider proof is tracked by its own rows.
-
-- {id: ID-01, source: doc14, requirement: One user can own several organizations, owner: core, status: partial, code: [apps/api/src/gluons/identity.py], tests: []}
-- {id: ID-02, source: doc14, requirement: Roles owner admin approver operator viewer field_rep support with permission matrix, owner: core, status: partial, code: [apps/api/src/gluons/authz.py], tests: []}
-- {id: ID-03, source: doc13, requirement: Email verification, password login, lockout, password reset, owner: core, status: partial, code: [apps/api/src/gluons/identity.py], tests: []}
-- {id: ID-04, source: doc14, requirement: TOTP MFA with recovery codes, owner: core, status: partial, code: [apps/api/src/gluons/identity.py], tests: []}
-- {id: ID-05, source: doc14, requirement: Session listing and revocation, owner: core, status: partial, code: [apps/api/src/gluons/identity.py], tests: []}
-- {id: ID-06, source: doc14, requirement: Row level security enforced for every tenant table, owner: core, status: partial, code: [apps/api/migrations/versions/0002_security.py], tests: []}
-- {id: ID-07, source: doc02, requirement: Immutable hash-chained audit trail with export, owner: core, status: partial, code: [apps/api/src/gluons/audit.py], tests: []}
-- {id: ID-08, source: doc13, requirement: Encrypted credential vault bound to tenant, owner: core, status: partial, code: [apps/api/src/gluons/vault.py], tests: []}
-- {id: AG-01, source: doc14, requirement: Multiple assistants per user with independent revocation, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-02, source: doc13, requirement: OAuth authorization server with PKCE S256 and resource indicators, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-03, source: doc02, requirement: CIMD and DCR client registration, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-04, source: doc14, requirement: Refresh rotation with reuse detection, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-05, source: doc14, requirement: Remote MCP server on Streamable HTTP for both protocol eras, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-06, source: doc02, requirement: Universal MCP tools from docs 02 and 13 with tenant enforcement, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-07, source: doc13, requirement: Claude and ChatGPT install instructions with verified limits, owner: mcp, status: not_started, code: [], tests: []}
-- {id: AG-08, source: doc13, requirement: Native Gluons chat fallback in the web app, owner: mcp, status: not_started, code: [], tests: []}
-- {id: CN-01, source: doc13, requirement: One-time connection sessions with state PKCE expiry, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-02, source: doc13, requirement: Setup link grants no authority and is owner-bound, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-03, source: doc13, requirement: Connection verify and disconnect with dependent automations fenced, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-04, source: doc13, requirement: Google OAuth for Gmail with least scopes, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-05, source: doc13, requirement: Gmail watch history cursor resync and renewal, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-06, source: doc13, requirement: Gmail message ingestion attachments threads and send, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-07, source: doc13, requirement: WhatsApp Embedded Signup and webhook verification, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-08, source: doc13, requirement: WhatsApp service window and template gate, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-09, source: doc13, requirement: Personal WhatsApp refused with supported path offered, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-10, source: doc13, requirement: Phone route state machine for new number forwarding and SIP, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-11, source: doc13, requirement: ElevenLabs agent setup tools post-call webhook HMAC, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-12, source: doc14, requirement: Shopify OAuth webhooks catalog fulfillment connector, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-13, source: doc14, requirement: Payment provider status-only adapter, owner: connectors, status: not_started, code: [], tests: []}
-- {id: CN-14, source: doc12, requirement: ERP connector with idempotent write and readback, owner: core, status: partial, code: [apps/api/src/gluons/connectors/erpnext.py], tests: [apps/api/tests/test_order_vertical.py::test_supervised_order_writes_once_and_is_verified_by_readback]}
-- {id: CN-15, source: doc02, requirement: Webhook inbox with signature replay and dedupe, owner: connectors, status: not_started, code: [], tests: []}
-- {id: RT-01, source: doc02, requirement: Task state machine with version checks, owner: core, status: partial, code: [apps/api/src/gluons/runtime/state.py], tests: []}
-- {id: RT-02, source: doc03, requirement: Durable checkpointed execution and crash recovery, owner: core, status: partial, code: [apps/api/src/gluons/runtime/engine.py], tests: [apps/api/tests/test_order_vertical.py::test_lost_response_is_recovered_by_lookup_not_a_second_write]}
-- {id: RT-03, source: doc02, requirement: Idempotent event intake, owner: core, status: partial, code: [apps/api/src/gluons/runtime/lifecycle.py], tests: [apps/api/tests/test_order_vertical.py::test_duplicate_delivery_creates_one_run_and_one_write]}
-- {id: RT-04, source: doc03, requirement: Safe retries with backoff dead letters and operator queue, owner: core, status: partial, code: [apps/api/src/gluons/queue.py, apps/api/src/gluons/runtime/worker.py], tests: []}
-- {id: RT-05, source: doc03, requirement: Pause resume cancel with honest effect reporting, owner: core, status: partial, code: [apps/api/src/gluons/runtime/lifecycle.py], tests: [apps/api/tests/test_order_vertical.py::test_pause_and_cancel_stop_a_waiting_run]}
-- {id: RT-06, source: doc02, requirement: Transactional outbox and reconciliation sweep, owner: core, status: partial, code: [apps/api/src/gluons/runtime/worker.py], tests: []}
-- {id: RT-07, source: doc12, requirement: Replaceable execution backend adapter, owner: core, status: partial, code: [apps/api/src/gluons/backends.py], tests: []}
-- {id: RT-08, source: doc01, requirement: Scheduling and event triggers, owner: core, status: partial, code: [apps/api/src/gluons/runtime/worker.py], tests: []}
-- {id: RT-09, source: doc03, requirement: Failure diagnosis, owner: core, status: partial, code: [apps/api/src/gluons/runtime/engine.py], tests: []}
-- {id: PL-01, source: doc13, requirement: Deterministic policy evaluation before every side effect, owner: core, status: partial, code: [apps/api/src/gluons/policy.py, apps/api/src/gluons/gateway.py], tests: []}
-- {id: PL-02, source: doc13, requirement: Connection does not grant action; provider scope is a ceiling, owner: core, status: partial, code: [apps/api/src/gluons/policy.py], tests: []}
-- {id: PL-03, source: doc08, requirement: Approvals signed expiring single-use bound to payload, owner: core, status: partial, code: [apps/api/src/gluons/approvals.py], tests: [apps/api/tests/test_order_vertical.py::test_denied_approval_writes_nothing]}
-- {id: PL-04, source: doc08, requirement: Maker-checker and dual control, owner: core, status: partial, code: [apps/api/src/gluons/approvals.py], tests: []}
-- {id: PL-05, source: doc01, requirement: Shadow and replay perform zero external writes, owner: core, status: partial, code: [apps/api/src/gluons/gateway.py, apps/api/src/gluons/net.py], tests: [apps/api/tests/test_order_vertical.py::test_shadow_makes_no_external_write_and_needs_no_grant]}
-- {id: PL-06, source: doc03, requirement: Budgets and spend limits hold under concurrency, owner: core, status: partial, code: [apps/api/src/gluons/billing.py], tests: []}
-- {id: PL-07, source: doc01, requirement: Emergency stop and category pause, owner: core, status: partial, code: [apps/api/src/gluons/runtime/lifecycle.py], tests: []}
-- {id: SK-01, source: doc03, requirement: Registry validates contract against blueprint, owner: core, status: partial, code: [apps/api/src/gluons/skills/registry.py], tests: []}
-- {id: SK-02, source: doc08, requirement: All 31 skills have executable contracts, owner: skills, status: partial, code: [packages/skills/multichannel_order_entry/contract.yaml], tests: []}
-- {id: SK-03, source: doc08, requirement: Universal failure fixtures run for every skill, owner: skills, status: not_started, code: [], tests: []}
-- {id: SK-04, source: doc08, requirement: Domain constraints enforced deterministically, owner: skills, status: not_started, code: [], tests: []}
-- {id: SK-05, source: doc01, requirement: Capability status derived from evidence, owner: skills, status: not_started, code: [], tests: []}
-- {id: SK-06, source: doc14, requirement: Commerce business-launch playbook, owner: skills, status: not_started, code: [], tests: []}
-- {id: SK-07, source: doc14, requirement: Launch never fakes KYC store ownership or supplier agreement, owner: skills, status: not_started, code: [], tests: []}
-- {id: SK-08, source: doc10, requirement: Dispatch optimization with OR-Tools, owner: skills, status: not_started, code: [], tests: []}
-- {id: SK-09, source: doc10, requirement: Document extraction behind an interface, owner: skills, status: not_started, code: [], tests: []}
-- {id: MD-01, source: doc02, requirement: Provider adapters for Google Anthropic OpenAI and private endpoints, owner: models, status: not_started, code: [], tests: []}
-- {id: MD-02, source: doc03, requirement: Router requires evaluated quality then cost and latency, owner: models, status: not_started, code: [], tests: []}
-- {id: MD-03, source: doc02, requirement: Token and cache accounting with fallback, owner: models, status: not_started, code: [], tests: []}
-- {id: MD-04, source: doc01, requirement: Try another model rejects a failing candidate, owner: models, status: not_started, code: [], tests: []}
-- {id: TR-01, source: doc01, requirement: Replay shadow supervised trial modes with comparator, owner: models, status: not_started, code: [], tests: []}
-- {id: TR-02, source: doc03, requirement: ROI reports separate measured from estimated, owner: models, status: not_started, code: [], tests: []}
-- {id: TR-03, source: doc01, requirement: Gradual activation needs a passing trial, owner: core, status: partial, code: [apps/api/src/gluons/runtime/lifecycle.py], tests: []}
-- {id: WB-01, source: doc01, requirement: Owner sign-in onboarding and organization selection, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-02, source: doc01, requirement: Home Business Pulse, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-03, source: doc01, requirement: Explore skills and skill detail, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-04, source: doc13, requirement: Connections and setup pages on mobile, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-05, source: doc01, requirement: Automation setup and trial studio, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-06, source: doc01, requirement: Tasks timeline receipts controls, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-07, source: doc01, requirement: Approval inbox with evidence and expiry, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-08, source: doc01, requirement: Calls messages and orders monitoring, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-09, source: doc01, requirement: Knowledge management, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-10, source: doc01, requirement: Models budgets billing analytics ROI, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-11, source: doc01, requirement: Team assistants security audit data export, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-12, source: doc01, requirement: Field representative mode, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-13, source: doc14, requirement: Business launch screens, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-14, source: doc13, requirement: PWA and mobile end-to-end tests, owner: web, status: not_started, code: [], tests: []}
-- {id: WB-15, source: doc03, requirement: Environment labels everywhere, owner: web, status: not_started, code: [], tests: []}
-- {id: IN-01, source: doc07, requirement: Terraform for all services with dev staging prod, owner: infra, status: not_started, code: [], tests: []}
-- {id: IN-02, source: doc07, requirement: Docker images and Compose, owner: infra, status: not_started, code: [], tests: []}
-- {id: IN-03, source: doc03, requirement: CI with scans and tests, owner: infra, status: not_started, code: [], tests: []}
-- {id: IN-04, source: doc07, requirement: Runbooks backups observability alerts, owner: infra, status: not_started, code: [], tests: []}
-- {id: IN-05, source: doc07, requirement: Secure configuration refuses unsafe hosted boot, owner: core, status: partial, code: [apps/api/src/gluons/config.py], tests: []}
+- id: ID-01
+  source: doc14
+  requirement: One user can own several organizations
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/identity.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-02
+  source: doc14
+  requirement: Roles owner admin approver operator viewer field_rep support with permission
+    matrix
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/authz.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-03
+  source: doc13
+  requirement: Email verification
+  password login: null
+  lockout: null
+  password reset: null
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/identity.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-04
+  source: doc14
+  requirement: TOTP MFA with recovery codes
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/identity.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-05
+  source: doc14
+  requirement: Session listing and revocation
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/identity.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-06
+  source: doc14
+  requirement: Row level security enforced for every tenant table
+  owner: core
+  status: partial
+  code:
+  - apps/api/migrations/versions/0002_security.py
+  - apps/api/migrations/versions/0007_system_policies.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-07
+  source: doc02
+  requirement: Immutable hash-chained audit trail with export
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/audit.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: ID-08
+  source: doc13
+  requirement: Encrypted credential vault bound to tenant
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/vault.py
+  tests:
+  - apps/api/tests/test_core_identity.py
+- id: AG-01
+  source: doc14
+  requirement: Multiple assistants per user with independent revocation
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/oauth/service.py
+  tests:
+  - apps/api/tests/test_assistant_oauth.py
+- id: AG-02
+  source: doc13
+  requirement: OAuth authorization server with PKCE S256 and resource indicators
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/oauth/service.py
+  tests:
+  - apps/api/tests/test_assistant_oauth.py
+- id: AG-03
+  source: doc02
+  requirement: CIMD and DCR client registration
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/oauth/service.py
+  tests:
+  - apps/api/tests/test_assistant_oauth.py
+- id: AG-04
+  source: doc14
+  requirement: Refresh rotation with reuse detection
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/oauth/service.py
+  tests:
+  - apps/api/tests/test_assistant_oauth.py
+- id: AG-05
+  source: doc14
+  requirement: Remote MCP server on Streamable HTTP for both protocol eras
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/mcp/server.py
+  tests:
+  - apps/api/tests/test_mcp_server.py
+- id: AG-06
+  source: doc02
+  requirement: Universal MCP tools from docs 02 and 13 with tenant enforcement
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/mcp/server.py
+  tests:
+  - apps/api/tests/test_mcp_server.py
+- id: AG-07
+  source: doc13
+  requirement: Claude and ChatGPT install instructions with verified limits
+  owner: mcp
+  status: partial
+  code:
+  - docs/ASSISTANT_SETUP.md
+  tests:
+  - apps/api/tests/test_mcp_server.py
+- id: AG-08
+  source: doc13
+  requirement: Native Gluons chat fallback in the web app
+  owner: mcp
+  status: not_started
+  code: []
+  tests: []
+- id: CN-01
+  source: doc13
+  requirement: One-time connection sessions with state PKCE expiry
+  owner: connectors
+  status: partial
+  code:
+  - apps/api/src/gluons/connections/service.py
+  tests:
+  - apps/api/tests/test_connections.py
+- id: CN-02
+  source: doc13
+  requirement: Setup link grants no authority and is owner-bound
+  owner: connectors
+  status: partial
+  code:
+  - apps/api/src/gluons/connections/service.py
+  tests:
+  - apps/api/tests/test_connections.py
+- id: CN-03
+  source: doc13
+  requirement: Connection verify and disconnect with dependent automations fenced
+  owner: connectors
+  status: partial
+  code:
+  - apps/api/src/gluons/connections/service.py
+  tests:
+  - apps/api/tests/test_connections.py
+- id: CN-04
+  source: doc13
+  requirement: Google OAuth for Gmail with least scopes
+  owner: connectors
+  status: partial
+  code:
+  - apps/api/src/gluons/connections/service.py
+  tests:
+  - apps/api/tests/test_connections.py
+- id: CN-05
+  source: doc13
+  requirement: Gmail watch history cursor resync and renewal
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-06
+  source: doc13
+  requirement: Gmail message ingestion attachments threads and send
+  owner: connectors
+  status: partial
+  code:
+  - apps/api/src/gluons/connectors/gmail.py
+  tests:
+  - apps/api/tests/test_gmail_connector.py
+- id: CN-07
+  source: doc13
+  requirement: WhatsApp Embedded Signup and webhook verification
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-08
+  source: doc13
+  requirement: WhatsApp service window and template gate
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-09
+  source: doc13
+  requirement: Personal WhatsApp refused with supported path offered
+  owner: connectors
+  status: partial
+  code:
+  - apps/api/src/gluons/connections/service.py
+  tests:
+  - apps/api/tests/test_connections.py
+- id: CN-10
+  source: doc13
+  requirement: Phone route state machine for new number forwarding and SIP
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-11
+  source: doc13
+  requirement: ElevenLabs agent setup tools post-call webhook HMAC
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-12
+  source: doc14
+  requirement: Shopify OAuth webhooks catalog fulfillment connector
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-13
+  source: doc14
+  requirement: Payment provider status-only adapter
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: CN-14
+  source: doc12
+  requirement: ERP connector with idempotent write and readback
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/connectors/erpnext.py
+  tests:
+  - apps/api/tests/test_order_vertical.py::test_supervised_order_writes_once_and_is_verified_by_readback
+- id: CN-15
+  source: doc02
+  requirement: Webhook inbox with signature replay and dedupe
+  owner: connectors
+  status: not_started
+  code: []
+  tests: []
+- id: RT-01
+  source: doc02
+  requirement: Task state machine with version checks
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/state.py
+  tests:
+  - apps/api/tests/test_core_runtime.py
+- id: RT-02
+  source: doc03
+  requirement: Durable checkpointed execution and crash recovery
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/engine.py
+  tests:
+  - apps/api/tests/test_order_vertical.py::test_lost_response_is_recovered_by_lookup_not_a_second_write
+- id: RT-03
+  source: doc02
+  requirement: Idempotent event intake
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/lifecycle.py
+  tests:
+  - apps/api/tests/test_order_vertical.py::test_duplicate_delivery_creates_one_run_and_one_write
+- id: RT-04
+  source: doc03
+  requirement: Safe retries with backoff dead letters and operator queue
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/queue.py
+  - apps/api/src/gluons/runtime/worker.py
+  tests:
+  - apps/api/tests/test_core_runtime.py
+- id: RT-05
+  source: doc03
+  requirement: Pause resume cancel with honest effect reporting
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/lifecycle.py
+  tests:
+  - apps/api/tests/test_order_vertical.py::test_pause_and_cancel_stop_a_waiting_run
+- id: RT-06
+  source: doc02
+  requirement: Transactional outbox and reconciliation sweep
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/worker.py
+  tests:
+  - apps/api/tests/test_core_runtime.py
+- id: RT-07
+  source: doc12
+  requirement: Replaceable execution backend adapter
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/backends.py
+  tests:
+  - apps/api/tests/test_core_runtime.py
+- id: RT-08
+  source: doc01
+  requirement: Scheduling and event triggers
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/worker.py
+  tests:
+  - apps/api/tests/test_core_runtime.py
+- id: RT-09
+  source: doc03
+  requirement: Failure diagnosis
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/engine.py
+  tests:
+  - apps/api/tests/test_core_runtime.py
+- id: PL-01
+  source: doc13
+  requirement: Deterministic policy evaluation before every side effect
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/policy.py
+  - apps/api/src/gluons/gateway.py
+  tests:
+  - apps/api/tests/test_core_policy.py
+- id: PL-02
+  source: doc13
+  requirement: Connection does not grant action; provider scope is a ceiling
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/policy.py
+  tests:
+  - apps/api/tests/test_core_policy.py
+- id: PL-03
+  source: doc08
+  requirement: Approvals signed expiring single-use bound to payload
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/approvals.py
+  tests:
+  - apps/api/tests/test_order_vertical.py::test_denied_approval_writes_nothing
+- id: PL-04
+  source: doc08
+  requirement: Maker-checker and dual control
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/approvals.py
+  tests:
+  - apps/api/tests/test_core_policy.py
+- id: PL-05
+  source: doc01
+  requirement: Shadow and replay perform zero external writes
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/gateway.py
+  - apps/api/src/gluons/net.py
+  tests:
+  - apps/api/tests/test_order_vertical.py::test_shadow_makes_no_external_write_and_needs_no_grant
+- id: PL-06
+  source: doc03
+  requirement: Budgets and spend limits hold under concurrency
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/billing.py
+  tests:
+  - apps/api/tests/test_core_policy.py
+- id: PL-07
+  source: doc01
+  requirement: Emergency stop and category pause
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/lifecycle.py
+  tests:
+  - apps/api/tests/test_core_policy.py
+- id: SK-01
+  source: doc03
+  requirement: Registry validates contract against blueprint
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/catalog.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: SK-02
+  source: doc08
+  requirement: All 31 skills have executable contracts
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/catalog.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: SK-03
+  source: doc08
+  requirement: Universal failure fixtures run for every skill
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/catalog.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: SK-04
+  source: doc08
+  requirement: Domain constraints enforced deterministically
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/catalog.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: SK-05
+  source: doc01
+  requirement: Capability status derived from evidence
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/catalog.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: SK-06
+  source: doc14
+  requirement: Commerce business-launch playbook
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/launch.py
+  tests:
+  - apps/api/tests/test_business_launch.py
+- id: SK-07
+  source: doc14
+  requirement: Launch never fakes KYC store ownership or supplier agreement
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/launch.py
+  tests:
+  - apps/api/tests/test_business_launch.py
+- id: SK-08
+  source: doc10
+  requirement: Dispatch optimization with OR-Tools
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/domain/dispatch.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: SK-09
+  source: doc10
+  requirement: Document extraction behind an interface
+  owner: skills
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/domain/documents.py
+  tests:
+  - apps/api/tests/test_skill_catalog.py
+- id: MD-01
+  source: doc02
+  requirement: Provider adapters for Google Anthropic OpenAI and private endpoints
+  owner: models
+  status: partial
+  code:
+  - apps/api/src/gluons/model_gateway.py
+  tests:
+  - apps/api/tests/test_model_gateway.py
+- id: MD-02
+  source: doc03
+  requirement: Router requires evaluated quality then cost and latency
+  owner: models
+  status: partial
+  code:
+  - apps/api/src/gluons/model_gateway.py
+  tests:
+  - apps/api/tests/test_model_gateway.py
+- id: MD-03
+  source: doc02
+  requirement: Token and cache accounting with fallback
+  owner: models
+  status: partial
+  code:
+  - apps/api/src/gluons/model_gateway.py
+  tests:
+  - apps/api/tests/test_model_gateway.py
+- id: MD-04
+  source: doc01
+  requirement: Try another model rejects a failing candidate
+  owner: models
+  status: partial
+  code:
+  - apps/api/src/gluons/model_gateway.py
+  tests:
+  - apps/api/tests/test_model_gateway.py
+- id: TR-01
+  source: doc01
+  requirement: Replay shadow supervised trial modes with comparator
+  owner: models
+  status: partial
+  code:
+  - apps/api/src/gluons/trials.py
+  tests:
+  - apps/api/tests/test_business_evidence.py
+- id: TR-02
+  source: doc03
+  requirement: ROI reports separate measured from estimated
+  owner: models
+  status: partial
+  code:
+  - apps/api/src/gluons/trials.py
+  tests:
+  - apps/api/tests/test_business_evidence.py
+- id: TR-03
+  source: doc01
+  requirement: Gradual activation needs a passing trial
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/lifecycle.py
+  tests: []
+- id: WB-01
+  source: doc01
+  requirement: Owner sign-in onboarding and organization selection
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-02
+  source: doc01
+  requirement: Home Business Pulse
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-03
+  source: doc01
+  requirement: Explore skills and skill detail
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-04
+  source: doc13
+  requirement: Connections and setup pages on mobile
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-05
+  source: doc01
+  requirement: Automation setup and trial studio
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-06
+  source: doc01
+  requirement: Tasks timeline receipts controls
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-07
+  source: doc01
+  requirement: Approval inbox with evidence and expiry
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-08
+  source: doc01
+  requirement: Calls messages and orders monitoring
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-09
+  source: doc01
+  requirement: Knowledge management
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-10
+  source: doc01
+  requirement: Models budgets billing analytics ROI
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-11
+  source: doc01
+  requirement: Team assistants security audit data export
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-12
+  source: doc01
+  requirement: Field representative mode
+  owner: web
+  status: not_started
+  code: []
+  tests: []
+- id: WB-13
+  source: doc14
+  requirement: Business launch screens
+  owner: web
+  status: not_started
+  code: []
+  tests: []
+- id: WB-14
+  source: doc13
+  requirement: PWA and mobile end-to-end tests
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: WB-15
+  source: doc03
+  requirement: Environment labels everywhere
+  owner: web
+  status: partial
+  code:
+  - apps/web/src
+  tests:
+  - apps/web/tests/owner-flow.spec.ts
+- id: IN-01
+  source: doc07
+  requirement: Terraform for all services with dev staging prod
+  owner: infra
+  status: partial
+  code:
+  - infra/terraform/main.tf
+  tests: []
+- id: IN-02
+  source: doc07
+  requirement: Docker images and Compose
+  owner: infra
+  status: partial
+  code:
+  - docker-compose.yml
+  tests: []
+- id: IN-03
+  source: doc03
+  requirement: CI with scans and tests
+  owner: infra
+  status: not_started
+  code: []
+  tests: []
+- id: IN-04
+  source: doc07
+  requirement: Runbooks backups observability alerts
+  owner: infra
+  status: not_started
+  code: []
+  tests: []
+- id: IN-05
+  source: doc07
+  requirement: Secure configuration refuses unsafe hosted boot
+  owner: core
+  status: partial
+  code:
+  - apps/api/src/gluons/config.py
+  tests: []

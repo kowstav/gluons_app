@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from gluons import audit, events, queue, run_log
-from gluons.authz import Principal
+from gluons.authz import Principal, Role
 from gluons.core import GluonsError, conflict, new_id, not_found, utcnow, validation_failed
 from gluons.db.models import (
     ActionReceipt,
@@ -90,6 +90,8 @@ def create(
     trigger: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     principal.require("automations:write")
+    from gluons.assist import require_active
+    require_active(principal)
     skill = get_registry().get(skill_id)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         if plan_id is not None:
@@ -145,8 +147,12 @@ def list_all(principal: Principal) -> list[dict[str, Any]]:
 
 def configure(principal: Principal, automation_id: str, config: dict[str, Any], expected_version: int) -> dict[str, Any]:
     principal.require("automations:write")
+    from gluons.assist import require_active
+    require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         automation = _load(session, automation_id, lock=True)
+        if principal.role == Role.FIELD_REP and (automation.created_by != principal.user_id or automation.mode not in TRIAL_MODES):
+            raise GluonsError("FORBIDDEN", "A representative can configure only their own replay/shadow automation.", status=403)
         check_version(automation.version, expected_version)
         if automation.status not in ("draft", "configuring", "ready", "awaiting_activation"):
             raise conflict("Pause this automation before changing its configuration.")
@@ -177,10 +183,20 @@ def start_trial(
 ) -> dict[str, Any]:
     """Replay and shadow need no provider grant: neither can touch an external system."""
     principal.require("trials:write")
+    from gluons.assist import require_active
+    require_active(principal)
     if mode not in TRIAL_MODES:
         raise validation_failed("A trial runs in historical_replay or shadow mode.")
+    comparator = comparator or {}
+    minimum = comparator.get("minimum_cases", 10)
+    if type(minimum) is not int or not 1 <= minimum <= 10000:
+        raise validation_failed("Trial minimum_cases must be an integer from 1 to 10000.")
+    if not isinstance(comparator.get("expected_outcomes", {}), dict):
+        raise validation_failed("Trial expected_outcomes must map source event IDs to labelled outcomes.")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         automation = _load(session, automation_id, lock=True)
+        if principal.role == Role.FIELD_REP and automation.created_by != principal.user_id:
+            raise GluonsError("FORBIDDEN", "A representative can trial only their own automation.", status=403)
         check_version(automation.version, expected_version)
         target = TRIAL_MODES[mode]
         if automation.status != target:
@@ -523,8 +539,13 @@ def submit_event(
     actor: Principal | str = "webhook",
 ) -> dict[str, Any]:
     """Turns an inbound event into at most one run, however many times it is delivered."""
+    if isinstance(actor, Principal):
+        from gluons.assist import require_active
+        require_active(actor)
     with tenant_tx(tenant_id) as session:
         automation = _load(session, automation_id)
+        if isinstance(actor, Principal) and actor.role == Role.FIELD_REP and (automation.created_by != actor.user_id or automation.mode not in TRIAL_MODES):
+            raise GluonsError("FORBIDDEN", "Representatives may submit sample events only to their own replay/shadow trial.", status=403)
         if automation.status not in ACCEPTS_EVENTS:
             raise conflict(f"This automation is {automation.status} and is not accepting work.")
         run_id = new_id("run")
