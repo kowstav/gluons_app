@@ -16,8 +16,9 @@ from sqlalchemy import text
 from gluons import __version__
 from gluons.api import routes
 from gluons.config import get_settings
-from gluons.core import GluonsError, new_id
+from gluons.core import GluonsError
 from gluons.db.session import public_tx
+from gluons.observability import configure_logging, configure_tracing, request_scope
 from gluons.skills.registry import get_registry
 
 logger = logging.getLogger("gluons.api")
@@ -25,6 +26,7 @@ logger = logging.getLogger("gluons.api")
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging()
     from gluons.mcp.server import create_mcp_app, create_server
     from gluons.oauth.routes import router as oauth_router
 
@@ -53,23 +55,26 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):  # type: ignore[no-untyped-def]
-        request_id = request.headers.get("x-request-id") or new_id("req")
         started = time.monotonic()
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = request_id
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        logger.info(
-            "request",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status": response.status_code,
-                "ms": int((time.monotonic() - started) * 1000),
-            },
-        )
-        return response
+        with request_scope(request.headers) as request_id:
+            try:
+                response = await call_next(request)
+            except Exception:
+                logger.exception("request failed", extra={"method": request.method, "path": request.url.path})
+                raise
+            response.headers["X-Request-Id"] = request_id
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            logger.info(
+                "request",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            return response
 
     @app.exception_handler(GluonsError)
     async def on_gluons_error(request: Request, exc: GluonsError) -> JSONResponse:
@@ -110,6 +115,7 @@ def create_app() -> FastAPI:
         if router is not None:
             app.include_router(router)
     app.mount("/", create_mcp_app(mcp_server))
+    configure_tracing(app)
     return app
 
 

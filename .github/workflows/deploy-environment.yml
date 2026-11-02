@@ -1,0 +1,125 @@
+# Reusable deploy of one environment. Called only by deploy.yml.
+#
+# Needs these GitHub environment variables, all non-secret. docs/DEPLOYMENT_STATUS.md says
+# where each comes from:
+#   GCP_PROJECT_ID, GCP_REGION, GCP_WORKLOAD_IDENTITY_PROVIDER,
+#   GCP_DEPLOYER_SERVICE_ACCOUNT, GLUONS_PREFIX, GLUONS_PUBLIC_API_URL, GLUONS_PUBLIC_WEB_URL
+# No long-lived Google credential exists in GitHub. Authentication is by OIDC.
+name: Deploy environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      canary_percent:
+        type: number
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      PREFIX: ${{ vars.GLUONS_PREFIX }}
+      REPOSITORY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GLUONS_PREFIX }}
+      # Includes the run id because the registry enforces immutable tags, so a re-run needs a new one.
+      TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      PUBLIC_API_URL: ${{ vars.GLUONS_PUBLIC_API_URL }}
+      PUBLIC_WEB_URL: ${{ vars.GLUONS_PUBLIC_WEB_URL }}
+      CANARY_PERCENT: ${{ inputs.canary_percent }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push the API image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ env.REPOSITORY }}/api:${{ env.TAG }}
+
+      # NEXT_PUBLIC_API_URL is compiled in, so each environment gets its own web image.
+      - name: Build and push the web image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.REPOSITORY }}/web:${{ env.TAG }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.PUBLIC_API_URL }}
+
+      - name: Scan the pushed API image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REPOSITORY }}/api:${{ env.TAG }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Migrate
+        run: |
+          gcloud run jobs update "${PREFIX}-migrate" --region "$REGION" --image "${REPOSITORY}/api:${TAG}"
+          gcloud run jobs execute "${PREFIX}-migrate" --region "$REGION" --wait
+
+      - name: Sync skills
+        run: |
+          gcloud run jobs update "${PREFIX}-skills" --region "$REGION" --image "${REPOSITORY}/api:${TAG}"
+          gcloud run jobs execute "${PREFIX}-skills" --region "$REGION" --wait
+
+      - name: Roll out new revisions with no traffic
+        run: |
+          for service in worker webhooks mcp api; do
+            gcloud run services update "${PREFIX}-${service}" --region "$REGION" \
+              --image "${REPOSITORY}/api:${TAG}" --no-traffic --tag candidate
+          done
+          gcloud run services update "${PREFIX}-web" --region "$REGION" \
+            --image "${REPOSITORY}/web:${TAG}" --no-traffic --tag candidate
+
+      - name: Send canary traffic
+        run: |
+          for service in worker webhooks mcp api web; do
+            gcloud run services update-traffic "${PREFIX}-${service}" --region "$REGION" \
+              --to-tags "candidate=${CANARY_PERCENT}"
+          done
+
+      - name: Smoke test the public endpoints
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error --max-time 10 "${PUBLIC_API_URL}/ready" \
+              && curl --fail --silent --show-error --max-time 10 --output /dev/null "${PUBLIC_WEB_URL}/"; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Smoke test failed. Traffic stays where it is. See docs/runbooks/deploy-and-rollback.md"
+          exit 1
+
+      - name: Move all traffic to the new revisions
+        run: |
+          for service in worker webhooks mcp api web; do
+            gcloud run services update-traffic "${PREFIX}-${service}" --region "$REGION" --to-latest
+          done

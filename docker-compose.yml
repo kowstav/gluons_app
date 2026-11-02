@@ -1,6 +1,8 @@
 # Local development only: simulator data and throwaway local database credentials.
+# docker compose up --build
 name: gluons
 x-api: &api
+  image: gluons-api:local
   build:
     context: .
     dockerfile: apps/api/Dockerfile
@@ -20,7 +22,7 @@ x-api: &api
 
 services:
   postgres:
-    image: postgres:16.11-alpine
+    image: pgvector/pgvector:0.8.7-pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
     environment:
       POSTGRES_DB: gluons
       POSTGRES_PASSWORD: local-compose-only
@@ -33,7 +35,6 @@ services:
       retries: 20
   migrate:
     <<: *api
-    user: root
     command: ['gluons', 'migrate']
     depends_on:
       postgres: {condition: service_healthy}
@@ -55,16 +56,18 @@ services:
   worker:
     <<: *api
     command: ['gluons', 'worker']
+    healthcheck: {disable: true}
     depends_on:
       skills-sync: {condition: service_completed_successfully}
   sandbox-erp:
-    <<: *api
-    command: ['python', '-m', 'uvicorn', 'sandbox_erp:app', '--app-dir', '/app/apps/sandbox_erp', '--host', '0.0.0.0', '--port', '8100']
-    environment:
-      <<: *env
-      SANDBOX_ERP_DB: /app/.gluons-data/sandbox_erp.sqlite3
+    image: gluons-sandbox-erp:local
+    build:
+      context: .
+      dockerfile: apps/sandbox_erp/Dockerfile
     ports: ['127.0.0.1:8100:8100']
+    volumes: ['sandbox-erp-data:/data']
   web:
+    image: gluons-web:local
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -77,3 +80,4 @@ services:
 volumes:
   postgres-data:
   local-data:
+  sandbox-erp-data:

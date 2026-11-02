@@ -1,0 +1,9 @@
+# Published development keys in config.py are rejected outside local and test, and the
+# placeholder file holds no values. Nothing else is exempt.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Published development-only defaults and the empty placeholder file"
+paths = ['''^\.env\.example$''']
+regexes = ['''ZGV2LW9ubHkt[A-Za-z0-9+/=]+''']

@@ -1,0 +1,47 @@
+# Manual only. No push, tag or schedule can deploy.
+#
+# Staging runs first. Production can only follow in the same run, for the same commit, after
+# staging passed, the operator typed the confirmation, and a reviewer approved the protected
+# `production` GitHub environment. Nothing has been deployed by this workflow yet: it needs
+# the projects, Workload Identity Federation and environments in docs/DEPLOYMENT_STATUS.md.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      promote_to_production:
+        description: After staging passes, request production approval
+        type: boolean
+        default: false
+      confirm_production:
+        description: Type DEPLOY PRODUCTION to allow promotion
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    uses: ./.github/workflows/deploy-environment.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: staging
+      canary_percent: 100
+
+  production:
+    needs: staging
+    if: ${{ inputs.promote_to_production && inputs.confirm_production == 'DEPLOY PRODUCTION' }}
+    uses: ./.github/workflows/deploy-environment.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: production
+      canary_percent: 10

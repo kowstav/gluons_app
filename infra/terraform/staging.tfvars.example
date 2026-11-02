@@ -1,6 +1,0 @@
-project_id = "your-gluons-staging-project"
-environment = "staging"
-region = "us-central1"
-deploy_services = false
-# Apply is chargeable and requires explicit owner approval. Populate secrets through
-# Secret Manager, then use secret_env/migration_secret_env IDs, never secret values.
