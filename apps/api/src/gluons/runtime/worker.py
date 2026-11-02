@@ -7,6 +7,7 @@ import socket
 import time
 from collections.abc import Callable
 from datetime import timedelta
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from gluons.config import get_settings
 from gluons.core import new_id, utcnow
 from gluons.db.models import Automation, Incident, Job, OutboxEvent
 from gluons.db.session import system_tx, tenant_tx
+from gluons.observability import bind, configure_logging
 from gluons.runtime import engine, lifecycle
 
 logger = logging.getLogger("gluons.worker")
@@ -110,17 +112,30 @@ def _publish_outbox(job: Job, worker_id: str) -> None:
             event.published_at = utcnow()
 
 
+@lru_cache
+def _publisher() -> Any:
+    from google.cloud import pubsub_v1  # imported lazily: optional 'gcp' extra
+
+    # The client refuses an ordering key unless ordering is switched on here.
+    return pubsub_v1.PublisherClient(publisher_options=pubsub_v1.types.PublisherOptions(enable_message_ordering=True))
+
+
 def _publish(topic: str, event: OutboxEvent) -> None:
     import json
 
-    from google.cloud import pubsub_v1  # imported lazily: optional 'gcp' extra
-
-    publisher = pubsub_v1.PublisherClient()
-    publisher.publish(
-        topic,
-        json.dumps({"id": event.id, "topic": event.topic, "payload": event.payload}).encode(),
-        ordering_key=event.tenant_id or "",
-    ).result(timeout=10)
+    publisher = _publisher()
+    ordering_key = event.tenant_id or ""
+    try:
+        publisher.publish(
+            topic,
+            json.dumps({"id": event.id, "topic": event.topic, "payload": event.payload}).encode(),
+            ordering_key=ordering_key,
+        ).result(timeout=10)
+    except Exception:
+        # A failed publish pauses its ordering key until resumed, which would block the tenant.
+        if ordering_key:
+            publisher.resume_publish(topic, ordering_key)
+        raise
 
 
 def _dead_letter(job: Job, error: str) -> None:
@@ -164,7 +179,8 @@ def run_once(worker_id: str | None = None, *, limit: int = 10) -> int:
     worker = worker_id or f"{socket.gethostname()}:{os.getpid()}"
     jobs = queue.claim(worker, limit=limit, lease_seconds=settings.worker_lease_seconds)
     for job in jobs:
-        _handle(job, worker)
+        with bind(job_id=job.id, job_kind=job.kind, tenant_id=job.tenant_id):
+            _handle(job, worker)
     return len(jobs)
 
 
@@ -211,7 +227,7 @@ def _enqueue_interval_run(automation: Automation, now: Any) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     settings = get_settings()
     last_tick = utcnow() - timedelta(seconds=60)
     while True:
