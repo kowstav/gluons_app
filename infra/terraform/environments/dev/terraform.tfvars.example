@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars, which git ignores. Identifiers and flags only, never secret values.
+# Secrets go into Secret Manager with `gcloud secrets versions add`.
+project_id      = "your-gluons-dev-project"
+region          = "us-central1"
+deploy_services = false
+# billing_account   = "000000-000000-000000"
+# alert_email       = "oncall@your-domain.example"
+# github_repository = "your-org/gluons"
+# api_url           = "https://..."  # Required with deploy_services because dev has no load balancer.
+# web_url           = "https://..."
+# plain_env = {
+#   GLUONS_GOOGLE_CLIENT_ID = "..."
+#   GLUONS_MAIL_FROM        = "Gluons <no-reply@your-domain.example>"
+# }
+# populated_secrets = ["smtp-url", "google-client-secret"]
