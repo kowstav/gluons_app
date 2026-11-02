@@ -13,6 +13,7 @@ from gluons import chat, policy
 from gluons.actions import get_action
 from gluons.api.app import create_app
 from gluons.authz import Principal, Role
+from gluons.connectors import gmail  # noqa: F401 - registers the email.send action
 from gluons.core import GluonsError, canonical_json, hmac_sha256_hex, new_id, utcnow
 from gluons.db.models import Organization
 from gluons.db.session import tenant_tx
