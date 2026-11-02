@@ -139,18 +139,24 @@ def _sign_decision(approval: Approval, user_id: str, decision: str, decided_at: 
     return hmac_sha256_hex(settings.key_bytes(settings.signing_key_b64), document)
 
 
-def _check_authority(principal: Principal, approval: Approval) -> None:
+def _check_authority(principal: Principal, approval: Approval, decision: str = "approve") -> None:
     principal.require("approvals:decide")
-    if (approval.action or "").startswith("business_launch.") and principal.kind != "user":
-        raise forbidden("Business launch decisions require the owner in Gluons Web.")
     role = principal.role
     if role is None or role not in ROLE_RANK:
         raise forbidden("This role cannot decide approvals.")
     required = Role(approval.required_role)
     if ROLE_RANK[role] < ROLE_RANK.get(required, 1):
         raise forbidden(f"This action needs a decision from a {required.value}.")
+    # Refusing can only stop an action, so tier limits and the web-only rule guard approval alone.
+    if decision == "deny":
+        return
+    if (approval.action or "").startswith("business_launch.") and principal.kind != "user":
+        raise forbidden("Business launch decisions require the owner in Gluons Web.")
     if principal.approval_tier_limit and not risk_at_most(approval.risk_tier, principal.approval_tier_limit):
         raise forbidden("This is above your approval limit.")
+    # R3 and R4 always stay on Gluons Web, whatever tier a binding somehow holds.
+    if principal.kind == "assistant" and approval.risk_tier in ("R3", "R4"):
+        raise forbidden("High-risk approvals stay on Gluons Web.")
     # Maker-checker: nobody but an owner approves a high-risk action they set in motion.
     if (
         approval.requested_by == principal.user_id
@@ -184,7 +190,7 @@ def decide(
         approval.status = "expired"
         approval.version += 1
         raise GluonsError("APPROVAL_EXPIRED", "This approval has expired.", status=409)
-    _check_authority(principal, approval)
+    _check_authority(principal, approval, decision)
     if principal.user_id is None:
         raise forbidden("A signed-in person must decide this.")
     already = session.execute(

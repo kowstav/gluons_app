@@ -21,6 +21,7 @@ from gluons.config import get_settings
 from gluons.core import GluonsError, canonical_json
 from gluons.db.models import Approval
 from gluons.db.session import tenant_tx
+from gluons.mcp import operations
 from gluons.oauth import service as oauth
 from gluons.runtime import lifecycle
 from gluons.skills import catalog
@@ -126,10 +127,15 @@ def create_server() -> MCPServer:
 
     @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
     def start_trial(automation_id: Id, expected_version: Version, idempotency_key: Key,
-                    mode: Literal["historical_replay", "shadow"] = "shadow") -> dict[str, Any]:
-        """Start a persistent replay or shadow trial that performs zero external writes."""
-        return _mutate("start_trial", idempotency_key, {"id": automation_id, "version": expected_version, "mode": mode},
-                       lambda p: lifecycle.start_trial(p, automation_id, mode, expected_version))
+                    mode: Literal["historical_replay", "shadow"] = "shadow",
+                    comparator: dict[str, Any] | None = None, baseline: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start a persistent replay or shadow trial that performs zero external writes.
+
+        A trial passes only against pass_criteria stored in the comparator before it runs.
+        """
+        args = {"id": automation_id, "version": expected_version, "mode": mode, "comparator": comparator, "baseline": baseline}
+        return _mutate("start_trial", idempotency_key, args,
+                       lambda p: lifecycle.start_trial(p, automation_id, mode, expected_version, comparator=comparator, baseline=baseline))
 
     @server.tool(annotations={"readOnlyHint": False, "destructiveHint": True})
     def activate_automation(automation_id: Id, expected_version: Version, idempotency_key: Key,
@@ -181,6 +187,16 @@ def create_server() -> MCPServer:
         return _mutate("approve_action", idempotency_key,
                        {"id": approval_id, "decision": decision, "version": expected_version, "reason": reason}, decide)
 
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+    def deny_action(approval_id: Id, expected_version: Version, idempotency_key: Key,
+                    reason: str | None = None) -> dict[str, Any]:
+        """Refuse a pending action at any risk tier. Refusing can only stop work, so it needs no tier."""
+        def refuse(p: Principal) -> dict[str, Any]:
+            with tenant_tx(p.tenant_id, p.user_id) as session:
+                return approvals.serialize(approvals.decide(session, p, approval_id, "deny", reason=reason,
+                                                            expected_version=expected_version))
+        return _mutate("deny_action", idempotency_key, {"id": approval_id, "version": expected_version, "reason": reason}, refuse)
+
     @server.tool(annotations={"readOnlyHint": True})
     def list_pending_approvals() -> dict[str, Any]:
         """List pending decisions without implicitly approving any action."""
@@ -217,6 +233,96 @@ def create_server() -> MCPServer:
                 raise not_found("Connection")
             return match
         return _call(find)
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def connections_list() -> dict[str, Any]:
+        """Doc 13 name for list_connections; never returns provider credentials."""
+        from gluons.connections import service
+        return _call(lambda p: {"connections": service.list_connections(p)})
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+    def connection_begin(provider: str, requested_capabilities: list[str], idempotency_key: Key,
+                         automation_plan_id: str | None = None) -> dict[str, Any]:
+        """Return a setup link for the owner's browser. The link grants nothing until provider consent completes."""
+        from gluons.connections import service
+        args = {"provider": provider, "capabilities": requested_capabilities, "plan": automation_plan_id}
+        return _mutate("connection_begin", idempotency_key, args,
+                       lambda p: service.begin_session(p, provider, capabilities=requested_capabilities,
+                                                       automation_plan_id=automation_plan_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def connection_status(session_id: Id) -> dict[str, Any]:
+        """Poll one onboarding session. Reports status only and never contains tokens."""
+        from gluons.connections import service
+        return _call(lambda p: service.session_status(p, session_id))
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": True})
+    def connection_disconnect(connection_id: Id, idempotency_key: Key) -> dict[str, Any]:
+        """Revoke a connection, fence dependent automations and report what cannot be undone."""
+        from gluons.connections import service
+        return _mutate("connection_disconnect", idempotency_key, {"id": connection_id},
+                       lambda p: service.disconnect(p, connection_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def list_missing_connections(skill_id: Id | None = None, automation_id: Id | None = None) -> dict[str, Any]:
+        """List what must still be connected for a skill or automation, from this business's real connections."""
+        return _call(lambda p: operations.missing_connections(p, skill_id=skill_id, automation_id=automation_id))
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+    def phone_route_begin(mode: Literal["new_number", "carrier_forwarding", "sip_pbx"], idempotency_key: Key,
+                          number_hint: str | None = None, country: str | None = None,
+                          automation_id: str | None = None) -> dict[str, Any]:
+        """Start a phone route request. It buys no number and redirects no calls; owner steps follow."""
+        from gluons.telephony import service as telephony
+        args = {"mode": mode, "number_hint": number_hint, "country": country, "automation_id": automation_id}
+        return _mutate("phone_route_begin", idempotency_key, args,
+                       lambda p: telephony.begin_route(p, mode, number_hint=number_hint, country=country, automation_id=automation_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def phone_route_status(route_id: Id) -> dict[str, Any]:
+        """Read a phone route's state and whether a test call was really observed."""
+        from gluons.telephony import service as telephony
+        return _call(lambda p: telephony.route_status(p, route_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def estimate_cost(skill_id: Id) -> dict[str, Any]:
+        """Estimate model cost from registered, evaluated models; provider charges are separate."""
+        return _call(lambda p: operations.estimate_cost(p, skill_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def policy_preview(automation_id: Id) -> dict[str, Any]:
+        """Show proposed actions, limits and data disclosures. Previewing grants nothing."""
+        return _call(lambda p: operations.policy_preview(p, automation_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
+    def policy_status(automation_id: Id) -> dict[str, Any]:
+        """Read the signed policy, approved actions, live mode and limits."""
+        return _call(lambda p: operations.policy_status(p, automation_id))
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+    def policy_request_activation(automation_id: Id, mode: Literal["supervised", "live"], idempotency_key: Key) -> dict[str, Any]:
+        """Ask the owner to activate. Never self-approves: returns what the owner must do in Gluons Web."""
+        return _mutate("policy_request_activation", idempotency_key, {"id": automation_id, "mode": mode},
+                       lambda p: operations.request_activation(p, automation_id, mode))
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+    def set_task_policy(automation_id: Id, mode: Literal["supervised", "live"], allowed_actions: list[str], idempotency_key: Key,
+                        per_action_limit_minor: Annotated[int | None, Field(ge=0)] = None,
+                        spend_limit_minor_per_month: Annotated[int | None, Field(ge=0)] = None) -> dict[str, Any]:
+        """Propose a policy diff for the owner to sign in Gluons Web. Nothing changes until they do."""
+        spec = {"mode": mode, "allowed_actions": allowed_actions, "per_action_limit_minor": per_action_limit_minor,
+                "spend_limit_minor_per_month": spend_limit_minor_per_month}
+        return _mutate("set_task_policy", idempotency_key, {"id": automation_id, **spec},
+                       lambda p: operations.request_policy_change(p, automation_id, spec))
+
+    @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+    def set_budget(monthly_budget_usd: Annotated[float, Field(ge=0)], idempotency_key: Key, automation_id: Id | None = None,
+                   expected_version: Version | None = None) -> dict[str, Any]:
+        """Tighten a monthly budget. Raising one needs the owner in Gluons Web."""
+        args = {"budget": monthly_budget_usd, "id": automation_id, "version": expected_version}
+        return _mutate("set_budget", idempotency_key, args,
+                       lambda p: operations.set_budget(p, monthly_budget_usd, automation_id=automation_id,
+                                                       expected_version=expected_version))
 
     @server.tool(annotations={"readOnlyHint": True})
     def get_trial_report(trial_id: Id) -> dict[str, Any]:

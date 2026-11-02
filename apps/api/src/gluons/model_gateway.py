@@ -78,6 +78,16 @@ def is_configured(tenant_id: str, purpose: str) -> bool:
     return bool(_candidates(tenant_id, purpose))
 
 
+def eligible_models(tenant_id: str, skill_id: str) -> list[ModelDescriptor]:
+    """Models this business could route to right now, cheapest evaluated first."""
+    return _candidates(tenant_id, skill_id)
+
+
+def task_cost(model: ModelDescriptor, tokens: dict[str, int]) -> Decimal:
+    """Price of a token count at a registered rate. Never a provider invoice."""
+    return _cost(model, tokens)
+
+
 def _cost(model: ModelDescriptor, usage: dict[str, int]) -> Decimal:
     incoming, outgoing = usage["input_tokens"], usage["output_tokens"]
     cached, written = usage.get("cache_read_tokens", 0), usage.get("cache_write_tokens", 0)
