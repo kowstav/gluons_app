@@ -54,7 +54,9 @@ def capability_status(skill: LoadedSkill, evidence: list[SkillEvidence]) -> dict
     current = [e for e in evidence if e.version == version and e.passed]
     kinds = {e.kind for e in current}
     last = current[0].recorded_at.isoformat() if current else None
-    if "live_receipt" in kinds:
+    if skill.contract.execution_scope == "draft_only":
+        status = "blocked_by_external_dependency"
+    elif "live_receipt" in kinds:
         status = "live_verified"
     elif "sandbox_receipt" in kinds:
         status = "sandbox_verified"
@@ -67,6 +69,8 @@ def capability_status(skill: LoadedSkill, evidence: list[SkillEvidence]) -> dict
         "evidence_kinds": sorted(kinds),
         "last_verified_at": last,
         "blockers": [b.model_dump() for b in skill.contract.blockers],
+        "execution_scope": skill.contract.execution_scope,
+        "draft_evaluated": "draft_eval_suite" in kinds,
     }
 
 
@@ -83,6 +87,7 @@ def _summary(skill: LoadedSkill, evidence: list[SkillEvidence]) -> dict[str, Any
         "risk_tier": contract.risk_tier,
         "regulated": contract.regulated,
         "activation_modes": contract.activation_modes,
+        "execution_scope": contract.execution_scope,
         "connectors": [c.model_dump() for c in contract.connectors],
         "capability": capability_status(skill, evidence),
     }

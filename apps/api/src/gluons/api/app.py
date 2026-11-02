@@ -5,6 +5,7 @@ import importlib
 import logging
 import pkgutil
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -24,18 +25,30 @@ logger = logging.getLogger("gluons.api")
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    from gluons.mcp.server import create_mcp_app, create_server
+    from gluons.oauth.routes import router as oauth_router
+
+    mcp_server = create_server()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        async with mcp_server.session_manager.run():
+            yield
+
     app = FastAPI(
         title="Gluons API",
         version=__version__,
         docs_url=None if settings.env == "production" else "/docs",
         redoc_url=None,
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.web_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "Authorization"],
+        allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "Authorization", "MCP-Protocol-Version", "Mcp-Session-Id", "Mcp-Client-Info"],
+        expose_headers=["Mcp-Session-Id"],
     )
 
     @app.middleware("http")
@@ -90,11 +103,13 @@ def create_app() -> FastAPI:
         healthy = checks["database"] == "ok" and checks["skills"] != "invalid"
         return JSONResponse({"status": "ok" if healthy else "degraded", "checks": checks}, status_code=200 if healthy else 503)
 
+    app.include_router(oauth_router)
     for module in pkgutil.iter_modules(routes.__path__):
         loaded = importlib.import_module(f"{routes.__name__}.{module.name}")
         router = getattr(loaded, "router", None)
         if router is not None:
             app.include_router(router)
+    app.mount("/", create_mcp_app(mcp_server))
     return app
 
 

@@ -1,0 +1,79 @@
+# Local development only: simulator data and throwaway local database credentials.
+name: gluons
+x-api: &api
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+  environment: &env
+    GLUONS_ENV: local
+    GLUONS_DATABASE_URL: postgresql+psycopg://gluons_app:gluons_app_dev@postgres:5432/gluons
+    GLUONS_SYSTEM_DATABASE_URL: postgresql+psycopg://gluons_system:gluons_system_dev@postgres:5432/gluons
+    GLUONS_MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:local-compose-only@postgres:5432/gluons
+    GLUONS_DEV_ROLE_PASSWORDS: '1'
+    GLUONS_PUBLIC_API_URL: http://localhost:8000
+    GLUONS_PUBLIC_WEB_URL: http://localhost:3000
+    GLUONS_ALLOWED_WEB_ORIGINS: http://localhost:3000
+    GLUONS_MAIL_DIR: /app/.gluons-data/mail
+    GLUONS_SANDBOX_ERP_URL: http://sandbox-erp:8100
+  volumes:
+    - local-data:/app/.gluons-data
+
+services:
+  postgres:
+    image: postgres:16.11-alpine
+    environment:
+      POSTGRES_DB: gluons
+      POSTGRES_PASSWORD: local-compose-only
+    ports: ['127.0.0.1:5433:5432']
+    volumes: ['postgres-data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d gluons']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  migrate:
+    <<: *api
+    user: root
+    command: ['gluons', 'migrate']
+    depends_on:
+      postgres: {condition: service_healthy}
+  skills-sync:
+    <<: *api
+    command: ['gluons', 'skills-sync']
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  api:
+    <<: *api
+    ports: ['127.0.0.1:8000:8000']
+    depends_on:
+      skills-sync: {condition: service_completed_successfully}
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  worker:
+    <<: *api
+    command: ['gluons', 'worker']
+    depends_on:
+      skills-sync: {condition: service_completed_successfully}
+  sandbox-erp:
+    <<: *api
+    command: ['python', '-m', 'uvicorn', 'sandbox_erp:app', '--app-dir', '/app/apps/sandbox_erp', '--host', '0.0.0.0', '--port', '8100']
+    environment:
+      <<: *env
+      SANDBOX_ERP_DB: /app/.gluons-data/sandbox_erp.sqlite3
+    ports: ['127.0.0.1:8100:8100']
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ['127.0.0.1:3000:3000']
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  postgres-data:
+  local-data:

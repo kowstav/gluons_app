@@ -104,6 +104,7 @@ ASSISTANT_SCOPES: dict[str, frozenset[str]] = {
     "gluons.connections": frozenset({"connections:manage", "phone:manage"}),
     "gluons.approvals": frozenset({"approvals:decide"}),
     "gluons.activate": frozenset({"automations:activate"}),
+    "gluons.models": frozenset({"models:manage"}),
 }
 DEFAULT_ASSISTANT_SCOPES = ("gluons.read", "gluons.plan", "gluons.tasks")
 

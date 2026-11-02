@@ -1,0 +1,172 @@
+id: gluons.local_creator_campaigns
+slug: local_creator_campaigns
+version: 1.0.0
+title: Local Creator Campaigns
+domain: marketing
+risk_tier: R2
+regulated: false
+activation_modes:
+- historical_replay
+- shadow
+execution_scope: draft_only
+inputs:
+  type: object
+  required:
+  - facts
+  - source_evidence
+  additionalProperties: false
+  properties:
+    text:
+      type: string
+      maxLength: 100000
+    facts:
+      type: object
+      maxProperties: 100
+      properties:
+        business_location:
+          description: business location; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        marketing_brief:
+          description: marketing brief; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        creator_consent:
+          description: creator consent; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        approved_incentives:
+          description: approved incentives; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        visit_windows:
+          description: visit windows; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        platform_policies:
+          description: platform policies; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+      additionalProperties: true
+    source_evidence:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 1000
+outputs:
+  type: object
+  required:
+  - draft_id
+  - execution_scope
+  - pending_workflow
+  - external_actions_performed
+  - verified_external_outcome
+  properties:
+    draft_id:
+      type: string
+    execution_scope:
+      const: draft_only
+    pending_workflow:
+      type: array
+    external_actions_performed:
+      const: 0
+    verified_external_outcome:
+      const: false
+    calculations:
+      type: object
+    review_reasons:
+      type: array
+      items:
+        type: string
+connectors:
+- capability: messaging
+  providers:
+  - gmail
+  purpose: Send only consented individually approved invitations.
+actions: []
+default_policy:
+  mode: shadow
+  allowed_actions: []
+graph:
+  entry: prepare
+  nodes:
+    prepare:
+      primitive: domain
+      params:
+        fn: drafts.prepare
+      blueprint_steps:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      checkpoint: true
+      next: review
+    review:
+      primitive: human_review
+      params:
+        title: Local Creator Campaigns draft requires domain review
+        subject: draft
+        risk_tier: R2
+      next: finish
+      branches:
+        shadow: finish
+        approved: finish
+        denied: finish
+    finish:
+      primitive: complete
+      params:
+        outcome: draft_prepared_only
+        report:
+        - draft
+failure_handling:
+  Creator no-show: review
+  disclosure omissions: review
+  inappropriate content: review
+  unsupported performance claims: review
+  platform throttling: review
+metrics:
+- creator_show_rate
+- posted_content
+- cost_per_verified_post
+- attributed_bookings
+declared_status: blocked_by_external_dependency
+blockers:
+- dependency: gmail
+  needed: Implement and verify the skill-specific authorized provider graph; this
+    contract only prepares review packets.
+  kind: customer_system
+limitations:
+- Only input/evidence validation and a pending-work checklist run locally. Mapped
+  blueprint steps are recorded as not_executed, not certified as implemented.
+- No provider API operations or external-success claims. No supervised/live activation.
+- Domain specialist review and provider sandbox evidence remain required.

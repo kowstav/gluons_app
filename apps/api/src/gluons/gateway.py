@@ -36,7 +36,7 @@ from gluons.actions import (
     get_connector,
 )
 from gluons.backends import get_backend
-from gluons.core import fingerprint, new_id, utcnow
+from gluons.core import GluonsError, fingerprint, new_id, utcnow
 from gluons.db.models import (
     ActionAuthorization,
     ActionReceipt,
@@ -45,7 +45,7 @@ from gluons.db.models import (
     Connection,
     Incident,
 )
-from gluons.db.session import tenant_tx
+from gluons.db.session import operation_lock, tenant_tx
 from gluons.net import write_permit
 from gluons.policy import Decision, Outcome, PolicyInput, deny, evaluate
 
@@ -224,12 +224,21 @@ def _resolve_approval(
 ) -> tuple[ActionResult | None, str | None]:
     """Returns (stop result, approval id). A stop result means this attempt ends here."""
     found = _find_decided_approval(session, request, payload_hash)
+    # A failed decision rolls its transaction back. Check the clock here as well,
+    # instead of relying on the asynchronous expiry sweep to change the status.
+    if found is not None and found.expires_at <= utcnow() and found.consumed_at is None:
+        found.status = "expired"
+        found.version += 1
     if found is not None and found.status in ("denied", "expired", "cancelled"):
         outcome = deny(f"APPROVAL_{found.status.upper()}")
         _log_authorization(session, request, outcome, payload_hash, amount, found.id)
         return ActionResult(status="denied", reasons=outcome.reasons, approval_id=found.id), None
     if found is not None and found.status == "approved":
-        # A retry after a provider refusal reuses the approval it already consumed.
+        # An approval covers one write. Only a retry of that same write may reuse it.
+        if found.idempotency_key != request.idempotency_key:
+            outcome = deny("APPROVAL_ALREADY_USED")
+            _log_authorization(session, request, outcome, payload_hash, amount, found.id)
+            return ActionResult(status="denied", reasons=outcome.reasons, approval_id=found.id), None
         if found.consumed_at is None:
             approvals.consume(session, found, payload_hash)
         return None, found.id
@@ -319,6 +328,8 @@ def _decide(
     resources: dict[str, Any],
 ) -> _Plan:
     existing = _load_receipt(session, request, lock=True)
+    if existing is not None and existing.payload_hash != payload_hash:
+        return _Plan(result=ActionResult(status="denied", reasons=("IDEMPOTENCY_PAYLOAD_MISMATCH",)))
     if existing is not None and (existing.status == "mismatch" or (existing.status == "succeeded" and existing.verified)):
         return _Plan(result=_result_from_receipt(existing, duplicate=True))
 
@@ -430,7 +441,17 @@ def _connector_context(request: ActionRequest) -> ConnectorContext:
         if connection is None or connection.credential_ref is None:
             raise ProviderError("auth", "no stored credential for this connection")
         with tenant_tx(request.tenant_id) as session:
-            return vault.read(session, request.tenant_id, connection.credential_ref)
+            current = session.get(Connection, connection.id, with_for_update=True)
+            if current is None or current.disconnected_at or current.status != "connected":
+                raise ProviderError("auth", "this connection has been disconnected or needs reauthorization")
+            if current.provider == "gmail":
+                from gluons.connections.service import get_credential
+                try:
+                    return get_credential(session, request.tenant_id, current)
+                except GluonsError as exc:
+                    kind = "retryable" if exc.code == "EXTERNAL_UNAVAILABLE" else "auth"
+                    raise ProviderError(kind, exc.message) from exc
+            return vault.read(session, request.tenant_id, current.credential_ref)
 
     return ConnectorContext(
         tenant_id=request.tenant_id,
@@ -715,6 +736,16 @@ def _lookup_after_denial(request: ActionRequest, plan: _Plan, payload: BaseModel
 
 
 def execute(request: ActionRequest) -> ActionResult:
+    # A receipt alone does not stop two workers from both looking up an operation
+    # before either provider call has finished. Hold an action lock across that gap.
+    key = f"action:{request.tenant_id}:{request.action}:{request.idempotency_key}"
+    with operation_lock(key) as acquired:
+        if not acquired:
+            return ActionResult(status="retry", reasons=("CONCURRENT_ATTEMPT",), retry_after=2)
+        return _execute(request)
+
+
+def _execute(request: ActionRequest) -> ActionResult:
     spec = get_action(request.action)
     if spec is None:
         return ActionResult(status="denied", reasons=("ACTION_NOT_ALLOWLISTED",))

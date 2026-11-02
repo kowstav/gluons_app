@@ -1,0 +1,7 @@
+node_modules
+.next
+.e2e-mail
+test-results
+playwright-report
+.env*.local
+*.tsbuildinfo

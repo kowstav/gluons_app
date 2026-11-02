@@ -73,6 +73,8 @@ class SkillContract(BaseModel):
     risk_tier: str = Field(pattern=r"^R[0-4]$")
     regulated: bool = False
     activation_modes: list[str]
+    # Draft execution must never be advertised as the complete provider workflow.
+    execution_scope: Literal["provider_actions", "draft_only"] = "provider_actions"
     inputs: dict[str, Any]
     outputs: dict[str, Any]
     connectors: list[ConnectorRequirement] = Field(default_factory=list)

@@ -1,0 +1,164 @@
+id: gluons.property_valuation_reports
+slug: property_valuation_reports
+version: 1.0.0
+title: Property Valuation Reports
+domain: documents
+risk_tier: R4
+regulated: true
+activation_modes:
+- historical_replay
+- shadow
+execution_scope: draft_only
+inputs:
+  type: object
+  required:
+  - facts
+  - source_evidence
+  additionalProperties: false
+  properties:
+    text:
+      type: string
+      maxLength: 100000
+    facts:
+      type: object
+      maxProperties: 100
+      properties:
+        inspector_scans:
+          description: inspector scans; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        public_property_data:
+          description: public property data; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        market_comps:
+          description: market comps; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        appraisal_standards:
+          description: appraisal standards; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        appraiser_id:
+          description: appraiser ID; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+      additionalProperties: true
+    source_evidence:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 1000
+outputs:
+  type: object
+  required:
+  - draft_id
+  - execution_scope
+  - pending_workflow
+  - external_actions_performed
+  - verified_external_outcome
+  properties:
+    draft_id:
+      type: string
+    execution_scope:
+      const: draft_only
+    pending_workflow:
+      type: array
+    external_actions_performed:
+      const: 0
+    verified_external_outcome:
+      const: false
+    calculations:
+      type: object
+    review_reasons:
+      type: array
+      items:
+        type: string
+connectors:
+- capability: property_data
+  providers:
+  - licensed_property_feed
+  purpose: Licensed comparables and appraiser workflow.
+actions: []
+default_policy:
+  mode: shadow
+  allowed_actions: []
+graph:
+  entry: prepare
+  nodes:
+    prepare:
+      primitive: domain
+      params:
+        fn: drafts.prepare
+      blueprint_steps:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      checkpoint: true
+      next: review
+    review:
+      primitive: human_review
+      params:
+        title: Property Valuation Reports draft requires domain review
+        subject: draft
+        risk_tier: R4
+      next: finish
+      branches:
+        shadow: finish
+        approved: finish
+        denied: finish
+    finish:
+      primitive: complete
+      params:
+        outcome: draft_prepared_only
+        report:
+        - draft
+failure_handling:
+  No reliable comparables: review
+  atypical property: review
+  biased data: review
+  stale MLS: review
+  missing inspection evidence: review
+metrics:
+- review_time
+- appraisal_accuracy
+- outlier_rate
+- audit_provenance
+declared_status: blocked_by_external_dependency
+blockers:
+- dependency: licensed_property_feed
+  needed: Implement and verify the skill-specific authorized provider graph; this
+    contract only prepares review packets.
+  kind: customer_system
+limitations:
+- Only input/evidence validation and a pending-work checklist run locally. Mapped
+  blueprint steps are recorded as not_executed, not certified as implemented.
+- No provider API operations or external-success claims. No supervised/live activation.
+- Domain specialist review and provider sandbox evidence remain required.

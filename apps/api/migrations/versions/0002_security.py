@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 
 from alembic import op
+from psycopg import sql
+from sqlalchemy import text
 
 from gluons.db.models import TENANT_TABLES
 
@@ -41,26 +43,20 @@ def _create_role(name: str, password_env: str, dev_password: str, *options: str)
     password = os.environ.get(password_env)
     if not password and os.environ.get("GLUONS_DEV_ROLE_PASSWORDS"):
         password = dev_password
-    create = (
-        f"CREATE ROLE {name} LOGIN PASSWORD '{password}' {' '.join(options)}"
-        if password
-        else f"CREATE ROLE {name} NOLOGIN {' '.join(options)}"
-    )
-    op.execute(
-        f"""
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{name}') THEN
-            {create};
-          END IF;
-        END $$;
-        """
-    )
+    connection = op.get_bind()
+    if connection.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :name"), {"name": name}).first():
+        return
+    # Compose identifiers and password literals with the PostgreSQL driver. Quotes
+    # and dollar delimiters inside a secret cannot become migration SQL.
+    credential = sql.SQL("LOGIN PASSWORD {} ").format(sql.Literal(password)) if password else sql.SQL("NOLOGIN ")
+    statement = sql.SQL("CREATE ROLE {} ").format(sql.Identifier(name)) + credential + sql.SQL(" ".join(options))
+    with connection.connection.driver_connection.cursor() as cursor:
+        cursor.execute(statement)
 
 
 def upgrade() -> None:
     _create_role("gluons_app", "GLUONS_APP_ROLE_PASSWORD", "gluons_app_dev", "NOBYPASSRLS", "NOSUPERUSER")
-    _create_role("gluons_system", "GLUONS_SYSTEM_ROLE_PASSWORD", "gluons_system_dev", "BYPASSRLS", "NOSUPERUSER")
+    _create_role("gluons_system", "GLUONS_SYSTEM_ROLE_PASSWORD", "gluons_system_dev", "NOBYPASSRLS", "NOSUPERUSER")
     op.execute("GRANT USAGE ON SCHEMA public TO gluons_app, gluons_system")
 
     # organizations: visible when selected, or when the current user is a member.

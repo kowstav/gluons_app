@@ -1,0 +1,194 @@
+id: gluons.restaurant_inventory_planning
+slug: restaurant_inventory_planning
+version: 1.0.0
+title: Restaurant Inventory Planning
+domain: inventory
+risk_tier: R3
+regulated: false
+activation_modes:
+- historical_replay
+- shadow
+execution_scope: draft_only
+inputs:
+  type: object
+  required:
+  - facts
+  - source_evidence
+  additionalProperties: false
+  properties:
+    text:
+      type: string
+      maxLength: 100000
+    facts:
+      type: object
+      maxProperties: 100
+      properties:
+        pos_sales:
+          description: POS sales; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        recipes_bom:
+          description: recipes/BOM; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        stock_counts:
+          description: stock counts; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        suppliers:
+          description: suppliers; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        lead_times:
+          description: lead times; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        events:
+          description: events; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        forecast_inputs:
+          description: forecast inputs; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        staffing_rules:
+          description: staffing rules; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+      additionalProperties: true
+    source_evidence:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 1000
+outputs:
+  type: object
+  required:
+  - draft_id
+  - execution_scope
+  - pending_workflow
+  - external_actions_performed
+  - verified_external_outcome
+  properties:
+    draft_id:
+      type: string
+    execution_scope:
+      const: draft_only
+    pending_workflow:
+      type: array
+    external_actions_performed:
+      const: 0
+    verified_external_outcome:
+      const: false
+    calculations:
+      type: object
+    review_reasons:
+      type: array
+      items:
+        type: string
+connectors:
+- capability: pos
+  providers:
+  - customer_pos
+  purpose: Read authorized sales and recipes.
+- capability: erp
+  providers:
+  - erpnext
+  purpose: Verify stock and purchasing records.
+actions: []
+default_policy:
+  mode: shadow
+  allowed_actions: []
+graph:
+  entry: prepare
+  nodes:
+    prepare:
+      primitive: domain
+      params:
+        fn: drafts.prepare
+      blueprint_steps:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      checkpoint: true
+      next: review
+    review:
+      primitive: human_review
+      params:
+        title: Restaurant Inventory Planning draft requires domain review
+        subject: draft
+        risk_tier: R2
+      next: finish
+      branches:
+        shadow: finish
+        approved: finish
+        denied: finish
+    finish:
+      primitive: complete
+      params:
+        outcome: draft_prepared_only
+        report:
+        - draft
+failure_handling:
+  Spoiled stock: review
+  recipe missing: review
+  negative counts: review
+  vendor substitutions: review
+  event demand spike: review
+  forecast drift: review
+metrics:
+- forecast_error
+- food_waste_value
+- stockout_rate
+- PO_discrepancy
+- labor_hours_forecast_error
+declared_status: blocked_by_external_dependency
+blockers:
+- dependency: customer_pos, erpnext
+  needed: Implement and verify the skill-specific authorized provider graph; this
+    contract only prepares review packets.
+  kind: customer_system
+limitations:
+- Only input/evidence validation and a pending-work checklist run locally. Mapped
+  blueprint steps are recorded as not_executed, not certified as implemented.
+- No provider API operations or external-success claims. No supervised/live activation.
+- Domain specialist review and provider sandbox evidence remain required.

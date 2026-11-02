@@ -1,0 +1,93 @@
+import { expect, test, Page } from "@playwright/test";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
+async function navigate(page: Page, name: string) {
+  const menu = page.getByRole("button", { name: "Open navigation", exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name, exact: true }).click();
+}
+
+async function verificationToken(email: string): Promise<string> {
+  const directory = path.resolve(".e2e-mail");
+  for (const name of await readdir(directory)) {
+    const letter = JSON.parse(await readFile(path.join(directory, name), "utf8"));
+    if (letter.to === email && letter.subject === "Verify your Gluons email") {
+      return new URL(letter.body.split("Confirm your address: ")[1]).searchParams.get("token")!;
+    }
+  }
+  throw new Error("The real API did not deliver a verification email to its local outbox.");
+}
+
+test("owner can verify, create a business, trial, pause, cancel and manage its records", async ({ page }, testInfo) => {
+  const id = crypto.randomUUID().slice(0, 8);
+  const email = `browser-${id}@example.com`;
+  const password = "controlled-browser-test-password";
+  const consoleErrors: string[] = [];
+  page.on("pageerror", error => consoleErrors.push(error.message));
+  await page.goto("/register");
+  await page.getByLabel("Your name", { exact: true }).fill("Browser Test Owner");
+  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Create your account", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Check your email");
+  const token = await verificationToken(email);
+  await page.goto("/verify-email");
+  await page.getByLabel("Verification token", { exact: true }).fill(token);
+  await page.getByRole("button", { name: "Verify email", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Your email is verified");
+  await page.getByRole("link", { name: "Back to sign in", exact: true }).click();
+  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Make room for better work." })).toBeVisible();
+  await page.getByLabel("Business name", { exact: true }).fill(`Test Business ${id}`);
+  await page.getByLabel("Industry", { exact: true }).fill("Food distribution");
+  await page.getByLabel("Country code", { exact: true }).fill("IN");
+  await page.getByRole("button", { name: "Create business workspace" }).click();
+  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  await expect(page.getByText("0", { exact: true }).first()).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("business-pulse.png"), fullPage: true });
+
+  await navigate(page, "Explore skills");
+  await page.getByLabel("Search skills", { exact: true }).fill("order");
+  await page.locator('a[href="/explore/multichannel_order_entry"]').click();
+  await expect(page.getByRole("heading", { name: "Start with a draft", exact: true })).toBeVisible();
+  await page.getByLabel("Automation name", { exact: true }).fill(`Browser Order Trial ${id}`);
+  await page.getByLabel("Monthly budget (USD)", { exact: true }).fill("5");
+  await page.getByRole("button", { name: "Create draft automation" }).click();
+  await expect(page.getByRole("heading", { name: `Browser Order Trial ${id}`, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Start shadow trial", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("start-trial recorded");
+  await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByText("paused", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel automation", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Cancellation recorded");
+  await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+
+  await navigate(page, "Business knowledge");
+  await page.getByLabel("Title", { exact: true }).fill("Controlled test operating hours");
+  await page.getByLabel("Approved content", { exact: true }).fill("Test business opens Monday to Friday, 9am to 5pm. This is synthetic browser QA data.");
+  await page.getByRole("button", { name: "Save knowledge", exact: true }).click();
+  await expect(page.getByText("Controlled test operating hours", { exact: true })).toBeVisible();
+  await navigate(page, "Costs & insights");
+  await page.getByLabel("Monthly business budget (USD)", { exact: true }).fill("12");
+  await page.getByRole("button", { name: "Save monthly budget", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Monthly budget saved");
+  await navigate(page, "Approval inbox");
+  await expect(page.getByRole("heading", { name: "Nothing waiting on you.", exact: true })).toBeVisible();
+  await navigate(page, "Connections");
+  await page.getByRole("button", { name: "Review setup requirements" }).first().click();
+  await expect(page.getByText("needs configuration", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Configure Google Web OAuth client/)).toBeVisible();
+  await navigate(page, "Activity");
+  await expect(page.getByText("automation · created", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Verify audit chain", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Audit verification");
+  await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(consoleErrors).toEqual([]);
+});

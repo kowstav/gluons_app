@@ -22,10 +22,14 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _worker(_: argparse.Namespace) -> int:
-    from gluons.runtime.worker import main
+def _worker(args: argparse.Namespace) -> int:
+    from gluons.runtime.worker import drain, main, scheduler_tick
 
-    main()
+    if args.once:
+        scheduler_tick()
+        drain(max_rounds=20)
+    else:
+        main()
     return 0
 
 
@@ -45,7 +49,9 @@ def main() -> int:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.set_defaults(fn=_serve)
-    commands.add_parser("worker", help="run the background worker").set_defaults(fn=_worker)
+    worker = commands.add_parser("worker", help="run the background worker")
+    worker.add_argument("--once", action="store_true", help="schedule and drain due work, then exit (Cloud Run job)")
+    worker.set_defaults(fn=_worker)
     commands.add_parser("skills-sync", help="validate contracts and pin them").set_defaults(fn=_skills)
     args = parser.parse_args()
     return args.fn(args)

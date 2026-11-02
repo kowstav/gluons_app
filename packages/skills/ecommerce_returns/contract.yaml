@@ -1,0 +1,166 @@
+id: gluons.ecommerce_returns
+slug: ecommerce_returns
+version: 1.0.0
+title: Ecommerce Returns
+domain: fulfillment
+risk_tier: R3
+regulated: false
+activation_modes:
+- historical_replay
+- shadow
+execution_scope: draft_only
+inputs:
+  type: object
+  required:
+  - facts
+  - source_evidence
+  additionalProperties: false
+  properties:
+    text:
+      type: string
+      maxLength: 100000
+    facts:
+      type: object
+      maxProperties: 100
+      properties:
+        store_order:
+          description: store order; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        return_policy:
+          description: return policy; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        payment_ledger:
+          description: payment ledger; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        carrier_systems:
+          description: carrier systems; owner-supplied data remains unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+        product_and_warehouse_inventory:
+          description: product and warehouse inventory; owner-supplied data remains
+            unverified.
+          type:
+          - string
+          - number
+          - boolean
+          - array
+          - object
+      additionalProperties: true
+    source_evidence:
+      type: array
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+        maxLength: 1000
+outputs:
+  type: object
+  required:
+  - draft_id
+  - execution_scope
+  - pending_workflow
+  - external_actions_performed
+  - verified_external_outcome
+  properties:
+    draft_id:
+      type: string
+    execution_scope:
+      const: draft_only
+    pending_workflow:
+      type: array
+    external_actions_performed:
+      const: 0
+    verified_external_outcome:
+      const: false
+    calculations:
+      type: object
+    review_reasons:
+      type: array
+      items:
+        type: string
+connectors:
+- capability: storefront
+  providers:
+  - shopify
+  purpose: Verify paid orders, return eligibility and provider status.
+actions: []
+default_policy:
+  mode: shadow
+  allowed_actions: []
+graph:
+  entry: prepare
+  nodes:
+    prepare:
+      primitive: domain
+      params:
+        fn: drafts.prepare
+      blueprint_steps:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      checkpoint: true
+      next: review
+    review:
+      primitive: human_review
+      params:
+        title: Ecommerce Returns draft requires domain review
+        subject: draft
+        risk_tier: R2
+      next: finish
+      branches:
+        shadow: finish
+        approved: finish
+        denied: finish
+    finish:
+      primitive: complete
+      params:
+        outcome: draft_prepared_only
+        report:
+        - draft
+failure_handling:
+  Fraud suspicion: review
+  partial order: review
+  damaged goods: review
+  international duty: review
+  missing receipt: review
+  lost parcel: review
+metrics:
+- time_to_resolution
+- refund_error_rate
+- exchange_conversion
+- support_tickets_avoided
+declared_status: blocked_by_external_dependency
+blockers:
+- dependency: shopify
+  needed: Implement and verify the skill-specific authorized provider graph; this
+    contract only prepares review packets.
+  kind: customer_system
+limitations:
+- Only input/evidence validation and a pending-work checklist run locally. Mapped
+  blueprint steps are recorded as not_executed, not certified as implemented.
+- No provider API operations or external-success claims. No supervised/live activation.
+- Domain specialist review and provider sandbox evidence remain required.

@@ -214,6 +214,8 @@ def readiness(session: Session, automation: Automation, mode: str) -> list[dict[
     """Everything still missing before this mode can start. Empty means ready."""
     skill = get_registry().get(automation.skill_id, automation.skill_version)
     missing: list[dict[str, Any]] = []
+    if getattr(skill, "execution_scope", "provider_actions") == "draft_only":
+        missing.append({"kind": "implementation", "detail": "This skill currently supports replay/shadow draft processing only."})
     policy = session.get(AutomationPolicy, automation.current_policy_id) if automation.current_policy_id else None
     if policy is None or policy.status != "active":
         missing.append({"kind": "policy", "detail": "An owner must sign an action policy."})

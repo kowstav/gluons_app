@@ -29,9 +29,9 @@ dependencies = [
 [project.optional-dependencies]
 # Each optional extra wraps an upstream behind a Gluons-owned interface and is
 # imported lazily, so the control plane runs without it.
-mcp = ["mcp>=2.3,<3"]
-optimization = ["ortools>=9.11"]
-documents = ["markitdown[pdf]>=0.1.2", "pypdf>=5"]
+mcp = ["mcp==2.3.0"]
+optimization = ["ortools==9.15.6755"]
+documents = ["markitdown[pdf]==0.1.9", "pypdf==6.21.4"]
 docling = ["docling>=2.15"]
 llm = ["anthropic>=0.40", "openai>=1.60", "google-genai>=1.0"]
 gcp = ["google-cloud-kms>=3", "google-cloud-tasks>=2.17", "google-cloud-pubsub>=2.25", "google-cloud-storage>=2.18", "google-auth>=2.35"]

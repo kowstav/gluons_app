@@ -12,7 +12,7 @@ from gluons.authz import Principal
 from gluons.config import get_settings
 from gluons.core import GluonsError, auth_required, conflict, constant_time_equals, fingerprint, new_id, token_hash
 from gluons.db.models import ApiIdempotency
-from gluons.db.session import tenant_tx
+from gluons.db.session import operation_lock, tenant_tx
 from gluons.identity import SessionView
 
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
@@ -52,6 +52,13 @@ _ = Cookie  # re-exported for route modules
 
 def idempotent(principal: Principal, key: str, request: Any, fn: Callable[[], Any]) -> Any:
     """Replays the stored response for a retried write; a reused key with a new body fails."""
+    with operation_lock(f"api:{principal.tenant_id}:{key}") as acquired:
+        if not acquired:
+            raise conflict("A request with this Idempotency-Key is still running. Retry shortly.")
+        return _idempotent(principal, key, request, fn)
+
+
+def _idempotent(principal: Principal, key: str, request: Any, fn: Callable[[], Any]) -> Any:
     request_hash = fingerprint(request)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         existing = session.execute(select(ApiIdempotency).where(ApiIdempotency.key == key)).scalar_one_or_none()

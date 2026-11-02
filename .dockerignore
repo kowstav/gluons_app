@@ -1,0 +1,14 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+.pgdata
+.gluons-data
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/test-results
+**/playwright-report
+*.zip

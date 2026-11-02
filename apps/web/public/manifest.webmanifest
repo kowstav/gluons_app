@@ -1,0 +1,10 @@
+{
+  "name": "Gluons",
+  "short_name": "Gluons",
+  "description": "Your business automation control room",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f8",
+  "theme_color": "#10231c",
+  "icons": [{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]
+}

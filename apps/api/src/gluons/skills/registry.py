@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 from gluons.actions import get_action
 from gluons.config import get_settings
@@ -50,6 +52,11 @@ def _reachable(contract: SkillContract) -> set[str]:
 
 def validate(contract: SkillContract, blueprint: dict[str, Any], primitives: frozenset[str]) -> None:
     problems: list[str] = []
+    for name in ("inputs", "outputs"):
+        try:
+            Draft202012Validator.check_schema(getattr(contract, name))
+        except SchemaError:
+            problems.append(f"{name} is not a valid JSON schema")
     if contract.id != blueprint["id"]:
         problems.append(f"id {contract.id} does not match blueprint {blueprint['id']}")
     if contract.version != blueprint["version"]:
@@ -62,6 +69,8 @@ def validate(contract: SkillContract, blueprint: dict[str, Any], primitives: fro
     for branch in blueprint["failure_branches"]:
         if branch not in contract.failure_handling:
             problems.append(f"failure branch '{branch}' has no handler")
+        elif contract.failure_handling[branch] not in contract.graph.nodes:
+            problems.append(f"failure branch '{branch}' points at an unknown node")
     for metric in blueprint["metrics"]:
         if metric not in contract.metrics:
             problems.append(f"metric '{metric}' is not tracked")
@@ -76,8 +85,19 @@ def validate(contract: SkillContract, blueprint: dict[str, Any], primitives: fro
             name = node.params.get("action")
             if name is not None and name not in contract.actions:
                 problems.append(f"{node.id} uses undeclared action {name}")
+        if node.primitive == "domain":
+            from gluons.skills.primitives import DOMAIN_FUNCTIONS, load_domain
+
+            load_domain()
+            if node.params.get("fn") not in DOMAIN_FUNCTIONS:
+                problems.append(f"{node.id} uses an unknown domain function")
 
     has_human_gate = any(n.primitive == "human_review" for n in contract.graph.nodes.values())
+    if contract.execution_scope == "draft_only":
+        if set(contract.activation_modes) - {"historical_replay", "shadow"}:
+            problems.append("draft-only skills cannot advertise supervised or live modes")
+        if contract.actions or any(n.primitive == "action" for n in contract.graph.nodes.values()):
+            problems.append("draft-only skills cannot declare provider actions")
     for name in contract.actions:
         spec = get_action(name)
         if spec is None:

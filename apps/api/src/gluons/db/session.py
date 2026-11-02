@@ -2,7 +2,7 @@
 
 `tenant_tx` connects as `gluons_app`, a role with row level security forced on: a
 query that forgets a tenant filter still returns only the current tenant's rows.
-`system_tx` connects as `gluons_system` (BYPASSRLS) and is reserved for work with no
+`system_tx` connects as `gluons_system` (explicit worker RLS policies) for work with no
 tenant context yet: claiming queue jobs and routing inbound webhooks to a tenant.
 """
 from __future__ import annotations
@@ -13,6 +13,7 @@ from functools import lru_cache
 
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from gluons.config import get_settings
 
@@ -27,9 +28,16 @@ def system_engine() -> Engine:
     return create_engine(get_settings().system_database_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
 
 
+@lru_cache
+def lock_engine() -> Engine:
+    # Locks span provider calls, so they must not occupy the application pool:
+    # otherwise each lock holder could starve its own short DB transactions.
+    return create_engine(get_settings().database_url, poolclass=NullPool)
+
+
 def reset_engines() -> None:
     """Tests swap databases between sessions."""
-    for factory in (app_engine, system_engine):
+    for factory in (app_engine, system_engine, lock_engine):
         try:
             factory().dispose()
         except Exception:  # noqa: BLE001, S110 - engine may never have been created
@@ -78,3 +86,20 @@ def system_tx() -> Iterator[Session]:
     factory = sessionmaker(bind=system_engine(), expire_on_commit=False)
     with factory() as session, session.begin():
         yield session
+
+
+@contextmanager
+def operation_lock(key: str) -> Iterator[bool]:
+    """Cross-process exclusion across short DB transactions and a provider call.
+
+    A dedicated PostgreSQL session owns this lock. It is released on process death;
+    the durable write-ahead receipt still requires provider lookup on recovery.
+    Contenders return to the durable queue instead of waiting on a pool connection.
+    """
+    with lock_engine().connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        acquired = connection.execute(text("select pg_try_advisory_lock(hashtextextended(:key, 0))"), {"key": key}).scalar_one()
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                connection.execute(text("select pg_advisory_unlock(hashtextextended(:key, 0))"), {"key": key})
