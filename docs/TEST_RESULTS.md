@@ -2,6 +2,34 @@
 
 Results are recorded from actual runs, newest first. Provider-double tests are labelled as such and prove Gluons' handling only, not the provider integration.
 
+## Integrated build (2026-11-02)
+
+All runs are from one commit after merging the agent branches with the GPT checkpoint.
+
+| Check | Result |
+|---|---|
+| Backend suite, real embedded PostgreSQL as the restricted role, real HTTP ERP simulator | **674 passed**, 0 failed, 0 skipped, 488 s |
+| Playwright against the real API and PostgreSQL, desktop Chromium and Pixel 7 | **2 passed**, 72 s |
+| `next build` and `tsc --noEmit` | Passed |
+| Ruff across `apps/api` | Passed |
+| Traceability | 83 requirements, 0 problems: 10 done, 63 partial, 10 blocked, 0 not started |
+| `terraform fmt -check` and `validate` for dev, staging and prod | Passed offline |
+| `docker compose config --quiet` | Passed. No image was built. |
+
+The browser tests now also cover the orders and messages panels, a real paged data download and the assistant over `/v1/chat`.
+
+Before merging, GPT's tree passed 382 tests alone. The first merged run had 2 failures, and later runs found more. None were hidden or skipped:
+
+- **Real defect:** the gas hazard pattern missed the plain phrase "smell gas". Fixed.
+- **Real defect:** owner consent to an assist session accepted a principal with no browser session. It now requires one.
+- **Stale expectations:** tests that assumed a representative could create automations, and tests that called consent without a session, were updated to the stricter rules.
+- **Test isolation:** WhatsApp signup tests shared one phone number, which links globally. Each now has its own.
+- **Missing settings:** two new settings were absent from `.env.example`, caught by `test_every_setting_is_documented`.
+
+A shared test cluster left dirty by an earlier interrupted run failed to start in time, so runs used fresh clusters through `GLUONS_TEST_CLUSTER`.
+
+Provider tests use labelled doubles. No real Gmail, Meta, ElevenLabs, ERPNext, Shopify, payment or model provider has been exercised.
+
 ## Continuation checkpoint (2026-11-02)
 
 - Integrated backend suite: **269 passed**, exit 0. Real embedded PostgreSQL,

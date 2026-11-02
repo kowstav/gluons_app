@@ -12,6 +12,8 @@ All 31 blueprint skills are registered. Registration is not proof that a busines
 
 Other domains produce input-readiness and review checklists; they do not fabricate appraisals, tax returns, legal conclusions, hiring decisions, calls, customer messages or commercial outcomes.
 
+Every draft also runs the deterministic hard constraints in `skills/domain/constraints.py`: safety hazards, allergens, card numbers, contact eligibility, fake reviews, job-related criteria, sanctions flags, wires, patient identity, legal entity boundaries and professional sign-off. No model or owner setting can switch them off. They are review triggers, not legal or safety determinations.
+
 ## Catalog
 
 | Skill | Executable scope | Remaining release gate |
