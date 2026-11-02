@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import PASSWORD, make_user, order_event
 from sqlalchemy import inspect, text
 
 from gluons import audit, identity, policy
@@ -12,6 +11,7 @@ from gluons.core import GluonsError, new_id
 from gluons.db.models import TENANT_TABLES, Automation, Base, Connection, Organization
 from gluons.db.session import app_engine, tenant_tx
 from gluons.runtime import lifecycle
+from helpers import PASSWORD, make_user, order_event
 
 
 @pytest.fixture
