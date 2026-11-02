@@ -331,6 +331,12 @@ def create_server() -> MCPServer:
         return _call(lambda p: trials.get_report(p, trial_id))
 
     @server.tool(annotations={"readOnlyHint": True})
+    def get_roi_report(automation_id: Id | None = None) -> dict[str, Any]:
+        """Read ROI with measured, estimated and unverified kept apart, each with method and denominator."""
+        from gluons import reports
+        return _call(lambda p: reports.roi(p, automation_id))
+
+    @server.tool(annotations={"readOnlyHint": True})
     def get_operational_report(period_days: Annotated[int, Field(ge=1, le=366)] = 30) -> dict[str, Any]:
         """Read business operations derived from persistent tasks and usage records."""
         from gluons import reports
