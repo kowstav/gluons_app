@@ -1,0 +1,21 @@
+# Linux, Python 3.13 pins for the `gcp` extra, on top of requirements.lock.
+# Resolved with: pip install --dry-run --report --platform manylinux2014_x86_64
+#   --only-binary=:all: --python-version 3.13 -c requirements.lock
+google-api-core==2.43.2
+google-auth==2.62.0
+google-cloud-core==2.8.0
+google-cloud-kms==3.18.0
+google-cloud-pubsub==2.43.0
+google-cloud-storage==3.17.1
+google-cloud-tasks==2.26.0
+google-crc32c==1.9.0
+google-resumable-media==2.11.0
+googleapis-common-protos==1.76.0
+grpc-google-iam-v1==0.14.6
+grpcio==1.85.1
+grpcio-status==1.85.1
+opentelemetry-sdk==1.45.2
+opentelemetry-semantic-conventions==0.66b2
+proto-plus==1.29.0
+pyasn1==0.6.5
+pyasn1_modules==0.4.2
