@@ -33,7 +33,7 @@ from gluons.core import (
     token_hash,
     utcnow,
 )
-from gluons.db.models import AgentBinding, OAuthAuthorizationRequest, OAuthClient, OAuthToken, User
+from gluons.db.models import AgentBinding, OAuthAuthorizationRequest, OAuthClient, OAuthToken, Organization, User
 from gluons.db.session import public_tx, system_tx, tenant_tx
 
 
@@ -226,13 +226,22 @@ def begin_authorization(*, client_id: str, redirect_uri: str, code_challenge: st
 
 def consent_preview(principal: Principal, request_id: str) -> dict[str, Any]:
     principal.require("org:read")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        organization = session.get(Organization, principal.tenant_id)
+        organization_name = organization.name if organization else principal.tenant_id
     with public_tx() as session:
         row = _pending(session, request_id)
         client = session.get(OAuthClient, row.client_id)
+        # Open registration means anyone can call a client "ChatGPT". Say so, because the
+        # callback address is the only thing here an owner can actually check.
         return {"id": row.id, "client_id": row.client_id, "client_name": client.client_name if client else "Assistant",
+                "client_identity_verified": False,
                 "scopes": row.scopes, "resource": row.resource, "tenant_id": principal.tenant_id,
+                "organization_name": organization_name,
                 "expires_at": row.expires_at.isoformat(), "redirect_uri": row.redirect_uri,
-                "notice": "This grants assistant access to the selected business only. Provider access and action policies remain separate."}
+                "notice": "Continue only if you started this from your own assistant just now. The name above is chosen by the "
+                          "client and is not verified, so check the callback address. This grants access to this business only. "
+                          "Provider access and action policies remain separate."}
 
 
 def _pending(session: Session, request_id: str) -> OAuthAuthorizationRequest:
@@ -316,23 +325,34 @@ def exchange_code(*, client_id: str, code: str, redirect_uri: str, code_verifier
             OAuthAuthorizationRequest.code_hash == token_hash(code))).scalar_one_or_none()
     if not tenant_id:
         raise OAuthError("invalid_grant", "This code is invalid, used, or expired.")
+    replayed = False
     with tenant_tx(tenant_id) as session:
         row = session.execute(select(OAuthAuthorizationRequest).where(
             OAuthAuthorizationRequest.code_hash == token_hash(code)).with_for_update()).scalar_one_or_none()
         challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest()).decode().rstrip("=")
-        if (row is None or row.status != "approved" or row.code_used_at is not None
-                or row.code_expires_at is None or row.code_expires_at <= utcnow()
-                or row.client_id != client_id or row.redirect_uri != redirect_uri or row.resource != resource_uri
-                or not constant_time_equals(row.code_challenge, challenge)):
-            raise OAuthError("invalid_grant", "This code, redirect URI, or verifier is invalid.")
-        binding = session.get(AgentBinding, row.binding_id, with_for_update=True)
-        _check_binding(session, binding, client_id)
-        row.code_used_at, row.status = utcnow(), "exchanged"
-        result = _issue_pair(session, binding, row.scopes)
-        audit.record(session, tenant_id=tenant_id, category="permission", event_type="assistant.connected",
-                     actor=binding.user_id, resource_type="agent_binding", resource_id=binding.id,
-                     data={"client_id": client_id, "scopes": row.scopes})
-        return result
+        if row is not None and row.code_used_at is not None and row.client_id == client_id:
+            # A code seen twice may have been stolen, so whatever it issued is suspect.
+            # Commit the revocation first: raising in here would roll it back.
+            session.execute(update(OAuthToken).where(OAuthToken.binding_id == row.binding_id).values(revoked_at=utcnow()))
+            audit.record(session, tenant_id=tenant_id, category="permission", event_type="assistant.code_replay_detected",
+                         actor=row.user_id or "unknown", resource_type="agent_binding", resource_id=row.binding_id)
+            replayed = True
+        else:
+            if (row is None or row.status != "approved" or row.code_used_at is not None
+                    or row.code_expires_at is None or row.code_expires_at <= utcnow()
+                    or row.client_id != client_id or row.redirect_uri != redirect_uri or row.resource != resource_uri
+                    or not constant_time_equals(row.code_challenge, challenge)):
+                raise OAuthError("invalid_grant", "This code, redirect URI, or verifier is invalid.")
+            binding = session.get(AgentBinding, row.binding_id, with_for_update=True)
+            _check_binding(session, binding, client_id)
+            row.code_used_at, row.status = utcnow(), "exchanged"
+            result = _issue_pair(session, binding, row.scopes)
+            audit.record(session, tenant_id=tenant_id, category="permission", event_type="assistant.connected",
+                         actor=binding.user_id, resource_type="agent_binding", resource_id=binding.id,
+                         data={"client_id": client_id, "scopes": row.scopes})
+    if replayed:
+        raise OAuthError("invalid_grant", "This code, redirect URI, or verifier is invalid.")
+    return result
 
 
 def _check_binding(session: Session, binding: AgentBinding | None, client_id: str | None = None) -> None:
@@ -409,10 +429,21 @@ def resolve_access_token(raw: str) -> Principal:
                          approval_tier_limit=min(limits))
 
 
+def _require_web_member(principal: Principal) -> bool:
+    """Everyone can manage their own assistants; admins also see the whole business."""
+    if principal.kind != "user" or not principal.user_id:
+        raise forbidden("Manage assistants from Gluons Web.")
+    principal.require("org:read")
+    return principal.can("assistants:manage")
+
+
 def list_bindings(principal: Principal) -> list[dict[str, Any]]:
-    principal.require("assistants:manage")
+    manages_all = _require_web_member(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
-        rows = session.execute(select(AgentBinding).order_by(AgentBinding.created_at.desc())).scalars()
+        query = select(AgentBinding).order_by(AgentBinding.created_at.desc())
+        if not manages_all:
+            query = query.where(AgentBinding.user_id == principal.user_id)
+        rows = session.execute(query).scalars()
         return [{"id": row.id, "client_id": row.client_id, "display_name": row.display_name, "host_kind": row.host_kind,
                  "user_id": row.user_id, "scopes": row.scopes, "status": row.status,
                  "created_at": row.created_at.isoformat(),
@@ -420,10 +451,10 @@ def list_bindings(principal: Principal) -> list[dict[str, Any]]:
 
 
 def revoke_binding(principal: Principal, binding_id: str) -> dict[str, Any]:
-    principal.require("assistants:manage")
+    manages_all = _require_web_member(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         row = session.get(AgentBinding, binding_id, with_for_update=True)
-        if row is None:
+        if row is None or (not manages_all and row.user_id != principal.user_id):
             raise not_found("Assistant")
         if row.status != "revoked":
             row.status, row.revoked_at, row.revoked_by = "revoked", utcnow(), principal.actor_id
