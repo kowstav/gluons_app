@@ -11,7 +11,7 @@ The API, MCP server and connectors share one Python package (`gluons`), with sep
 **Why:** runs locally and in tests with no cloud dependency, keeps state changes and enqueues in one transaction, and survives lost wake-ups. Cloud Workflows can be added behind `BackendAdapter` if proven necessary.
 
 ## ADR-003 Isolation enforced by the database
-`gluons_app` runs under `FORCE ROW LEVEL SECURITY`. `gluons_system` (BYPASSRLS) is limited to queue claims and webhook routing. History tables are append-only by trigger and by missing grants. Tests connect as the restricted role.
+`gluons_app` runs under `FORCE ROW LEVEL SECURITY`. `gluons_system` has no `BYPASSRLS` attribute: Cloud SQL customers cannot grant it, so migration `0007_system_policies` gives this one role explicit `system_access` policies instead. It is limited to queue claims and webhook routing. Both roles are created by migration SQL, never through the Cloud SQL Admin API, which would add them to `cloudsqlsuperuser`. History tables are append-only by trigger and by missing grants. Tests connect as the restricted role.
 
 ## ADR-004 Opaque OAuth tokens for assistants
 Gluons is both authorization server and MCP resource server, so tokens are opaque and hashed at rest, giving immediate revocation by database lookup. Refresh tokens rotate with reuse detection.
