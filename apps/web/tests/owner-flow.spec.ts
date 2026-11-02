@@ -91,10 +91,16 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await navigate(page, "Gluons assistant");
   await page.getByLabel("Business goal or command", { exact: true }).fill("show my tasks");
   await page.getByRole("button", { name: "Ask Gluons", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("persisted states");
+  await expect(page.getByRole("status")).toContainText("list_tasks");
   await navigate(page, "Business channels");
   await expect(page.getByRole("heading", { name: "Observed calls", exact: true })).toBeVisible();
   await expect(page.getByText("No authenticated calls observed. A setup checklist is not a completed call.")).toBeVisible();
+  await expect(page.getByText("No orders recorded yet.")).toBeVisible();
+  await expect(page.getByText("No messages received yet.")).toBeVisible();
+  await navigate(page, "Your data");
+  await expect(page.getByRole("heading", { name: "Close this business", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "automations", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Saved");
   await navigate(page, "Business launch");
   await page.getByLabel("Business goal", { exact: true }).fill("Open a synthetic craft shop for browser testing");
   await page.getByLabel("Business country", { exact: true }).fill("IN");

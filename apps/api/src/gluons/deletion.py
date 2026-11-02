@@ -1,13 +1,12 @@
-"""Organization data export and deletion requests. Both are owner actions in Gluons Web.
+"""Organization deletion requests, an owner action in Gluons Web.
 
-An export is complete for what it lists and says what it leaves out. A deletion request stops
-everything that can act and destroys credentials straight away. It does not erase records:
-no purge job exists yet, and the append-only history tables reject deletes by design. The
-response says exactly that, so a reader is never told data is gone while it is still stored.
+A request stops everything that can act and destroys credentials straight away. It does not
+erase records: no purge job exists yet, and the append-only history tables reject deletes by
+design. The response says exactly that, so a reader is never told data is gone while it is
+still stored. Owners download their data first through `data_export`.
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -15,9 +14,8 @@ from sqlalchemy import func, select, update
 from gluons import audit, policy, vault
 from gluons.authz import Principal
 from gluons.connections import service as connections
-from gluons.core import canonical_json, conflict, fingerprint, forbidden, not_found, utcnow, validation_failed
+from gluons.core import conflict, forbidden, not_found, utcnow, validation_failed
 from gluons.db.models import (
-    TENANT_TABLES,
     AgentBinding,
     Approval,
     Artifact,
@@ -31,25 +29,12 @@ from gluons.db.models import (
     KnowledgeDocument,
     Membership,
     Organization,
-    User,
     VaultSecret,
 )
 from gluons.db.session import tenant_tx
 from gluons.oauth import service as oauth
 from gluons.runtime import lifecycle
 
-MAX_ROWS_PER_TABLE = 20_000
-EXCLUDED_TABLES = {
-    "vault_secrets": "Encrypted provider credentials. Never exported.",
-    "oauth_tokens": "Assistant bearer tokens, stored only as hashes. Never exported.",
-    "connection_sessions": "Short-lived onboarding state holding OAuth state and PKCE references.",
-    "api_idempotency": "Cached API responses kept only to replay retried requests.",
-}
-CREDENTIAL_COLUMNS = frozenset({"token_hash", "credential_ref", "ciphertext", "wrapped_dek", "code_hash", "setup_handle_hash",
-                                "state_hash", "pkce_verifier_ref", "nonce_hash", "client_secret_hash"})
-NOT_INCLUDED = ("Artifact file contents: rows hold metadata and a storage reference only.",
-                "Queue, outbox and webhook inbox records, which are operational rather than business data.",
-                "Data held by connected providers, which stays with those providers.")
 RETAINED_TABLES = {
     "audit_events": "Immutable audit trail, kept as the record of who did what.",
     "approval_decisions": "Signed human decisions on consequential actions.",
@@ -65,51 +50,6 @@ def _owner_web(principal: Principal, permission: str) -> None:
     # WEB_ONLY_PERMISSIONS already strip these from assistants; this stays true if that list changes.
     if principal.kind != "user":
         raise forbidden("This is available only to the owner in Gluons Web.")
-
-
-def _plain(row: Any, columns: list[Any]) -> dict[str, Any]:
-    values = {column.name: getattr(row, column.name) for column in columns}
-    return audit.redact(json.loads(canonical_json(values)))
-
-
-def _export_table(session: Any, name: str) -> tuple[list[dict[str, Any]], int]:
-    table = Base.metadata.tables[name]
-    columns = [column for column in table.columns if column.name not in CREDENTIAL_COLUMNS]
-    total = session.execute(select(func.count()).select_from(table)).scalar_one()
-    order = [table.c[key] for key in ("created_at", "id") if key in table.c][:2]
-    rows = session.execute(select(*columns).order_by(*order).limit(MAX_ROWS_PER_TABLE)).all()
-    return [_plain(row, columns) for row in rows], total
-
-
-def export_organization(principal: Principal) -> dict[str, Any]:
-    """Row level security supplies the tenant filter, so this cannot read another business."""
-    _owner_web(principal, "data:export")
-    with tenant_tx(principal.tenant_id, principal.user_id) as session:
-        org = session.get(Organization, principal.tenant_id)
-        if org is None:
-            raise not_found("Organization")
-        tables: dict[str, list[dict[str, Any]]] = {}
-        counts: dict[str, int] = {}
-        truncated: dict[str, int] = {}
-        for name in TENANT_TABLES:
-            if name in EXCLUDED_TABLES:
-                continue
-            tables[name], counts[name] = _export_table(session, name)
-            if counts[name] > len(tables[name]):
-                truncated[name] = counts[name]
-        members = session.execute(select(Membership.user_id, User.email, User.display_name, Membership.role)
-                                  .join(User, User.id == Membership.user_id).where(Membership.removed_at.is_(None))).all()
-        chain = audit.verify_chain(session, principal.tenant_id)
-        audit.record(session, tenant_id=principal.tenant_id, category="data", event_type="data.exported", actor=principal,
-                     resource_type="organization", resource_id=principal.tenant_id,
-                     data={"tables": len(tables), "rows": sum(counts.values()), "truncated": sorted(truncated)})
-        organization = _plain(org, list(Organization.__table__.columns))
-    return {"format": "gluons.organization_export.v1", "exported_at": utcnow().isoformat(), "exported_by": principal.actor_id,
-            "organization": organization,
-            "members": [{"user_id": m.user_id, "email": m.email, "display_name": m.display_name, "role": m.role} for m in members],
-            "tables": tables, "row_counts": counts, "truncated": truncated, "excluded_tables": EXCLUDED_TABLES,
-            "removed_columns": sorted(CREDENTIAL_COLUMNS), "not_included": list(NOT_INCLUDED), "audit_chain": chain,
-            "content_sha256": fingerprint(tables)}
 
 
 def _begin_deletion(principal: Principal, confirm_name: str) -> None:

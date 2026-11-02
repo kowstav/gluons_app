@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from gluons import approvals, gateway, queue
+from gluons import approvals, events, gateway, queue
 from gluons.config import get_settings
 from gluons.core import new_id, utcnow
 from gluons.db.models import Automation, Incident, Job, OutboxEvent
@@ -63,6 +63,17 @@ def _gmail_ingest(job: Job, worker_id: str) -> None:
 def _gmail_maintain(job: Job, worker_id: str) -> None:
     from gluons.connections.gmail_sync import maintain
     maintain()
+
+
+@handler("notifications.deliver")
+def _deliver_notifications(job: Job, worker_id: str) -> None:
+    events.deliver_urgent()
+
+
+@handler("oauth.purge")
+def _purge_oauth(job: Job, worker_id: str) -> None:
+    from gluons.oauth.service import purge_stale
+    purge_stale()
 
 
 @handler("whatsapp.process")
@@ -219,7 +230,7 @@ def drain(worker_id: str = "drain", *, max_rounds: int = 100) -> int:
     return total
 
 
-PERIODIC: dict[str, int] = {"approvals.expire": 60, "reconcile.sweep": 300, "outbox.publish": 15, "gmail.maintain": 300}
+PERIODIC: dict[str, int] = {"approvals.expire": 60, "reconcile.sweep": 300, "outbox.publish": 15, "gmail.maintain": 300, "notifications.deliver": 60, "oauth.purge": 3600}
 
 
 def scheduler_tick() -> None:

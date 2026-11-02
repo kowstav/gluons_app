@@ -14,10 +14,13 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from gluons import events
 from gluons.core import fingerprint
+from gluons.db.session import tenant_tx
 from gluons.runtime.step import StepContext, StepOutcome
 from gluons.security import scan_untrusted
 from gluons.skills.contract import Node
+from gluons.skills.domain import constraints
 from gluons.skills.primitives import domain
 
 
@@ -149,6 +152,7 @@ CALCULATORS = {
     "restaurant_inventory_planning": inventory,
     "hardware_procurement": compare_quotes,
     "home_service_dispatch": dispatch,
+    "field_service_opportunity_detection": constraints.field_opportunities,
 }
 
 
@@ -177,17 +181,8 @@ def prepare(skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         reasons.append("Licensed professional review is required; no regulated sign-off has occurred.")
     if skill.contract.slug == "workflow_discovery" and facts.get("explicit_observation_consent") is not True:
         reasons.append("Observation consent is absent. No monitoring or telemetry collection is permitted.")
-    if skill.contract.slug in {"property_maintenance", "home_service_dispatch"} and re.search(
-        r"\b(gas leak|smell of gas|carbon monoxide|medical emergency|fire|electrocution)\b", text, re.I
-    ):
-        reasons.append("Safety emergency: contact the configured human emergency channel immediately; do not schedule routine work.")
-    if skill.contract.slug in {"abandoned_cart_retention", "lead_research_and_outreach", "local_creator_campaigns"}:
-        if facts.get("contact_consent") is not True or facts.get("suppressed") is True:
-            reasons.append("Contact eligibility has not been established; prepare drafts only and send nothing.")
-    if skill.contract.slug == "candidate_screening":
-        criteria = str(facts.get("assessment_criteria", "")).lower()
-        if any(field in criteria for field in ("race", "religion", "pregnan", "disability", "marital", "gender")):
-            reasons.append("Assessment criteria contain protected-attribute signals; recruiter review required.")
+    findings = constraints.evaluate(contract.slug, regulated=contract.regulated, text=text, facts=facts)
+    reasons.extend(stop["reason"] for stop in findings.stops)
     calculation: dict[str, Any] = {}
     calculator = CALCULATORS.get(skill.contract.slug)
     if calculator and not errors:
@@ -202,6 +197,8 @@ def prepare(skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "execution_scope": "draft_only", "status": "needs_review" if reasons else "draft_prepared",
         "source_hash": fingerprint(payload), "source_evidence": source_refs,
         "supplied_fields": sorted(facts), "missing_data": missing, "review_reasons": reasons,
+        "hard_constraints": {"checks": findings.checks, "stops": findings.stops, "preserved": findings.preserved},
+        "escalation": findings.escalation,
         "injection_flags": flags, "invariants": skill.blueprint.get("invariants"),
         "pending_workflow": [{**step, "status": "not_executed"} for step in skill.blueprint.get("workflow", [])],
         "calculations": calculation, "external_actions_performed": 0, "verified_external_outcome": False,
@@ -212,6 +209,13 @@ def prepare(skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 @domain("drafts.prepare")
 def prepare_step(ctx: StepContext, node: Node) -> StepOutcome:
     packet = prepare(ctx.skill_id, ctx.input)
+    if packet["escalation"]:
+        # A hazard cannot wait in a review queue. This reaches the owner in Gluons in every
+        # mode and contacts nobody outside it, so shadow still has zero external writes.
+        with tenant_tx(ctx.tenant_id) as session:
+            events.notify(session, ctx.tenant_id, kind="safety_escalation", title="Urgent: a person must respond now",
+                          body=packet["escalation"]["instruction"], severity="action", link=f"/runs/{ctx.run_id}",
+                          resource_type="run", resource_id=ctx.run_id)
     return StepOutcome(
         output=packet,
         state={"draft": packet, "review_reasons": packet["review_reasons"]},

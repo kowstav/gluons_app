@@ -10,7 +10,7 @@ from sqlalchemy import select
 from gluons import approvals, audit, billing, tasks
 from gluons.api.deps import PrincipalDep
 from gluons.core import not_found, utcnow
-from gluons.db.models import Approval, ApprovalDecision, AuditEvent, Incident, Notification
+from gluons.db.models import Approval, ApprovalDecision, AuditEvent, ChannelMessage, Incident, Notification, Order
 from gluons.db.session import tenant_tx
 
 router = APIRouter(prefix="/v1", tags=["oversight"])
@@ -25,6 +25,27 @@ class Decide(BaseModel):
 
 class ResolveIncident(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
+
+
+@router.get("/messages")
+def messages(principal: PrincipalDep) -> dict[str, Any]:
+    """Message text is untrusted customer input, labelled so no reader treats it as an instruction."""
+    principal.require("tasks:read")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        rows = session.execute(select(ChannelMessage).order_by(ChannelMessage.created_at.desc()).limit(100)).scalars()
+        return {"trust": "untrusted_customer_input",
+                "messages": [{"id": m.id, "thread_id": m.thread_id, "channel": m.channel, "direction": m.direction, "sender": m.sender, "recipient": m.recipient,
+                              "subject": m.subject, "body": m.body, "status": m.status, "attachments": len(m.attachments), "created_at": m.created_at.isoformat()} for m in rows]}
+
+
+@router.get("/orders")
+def orders(principal: PrincipalDep) -> dict[str, Any]:
+    principal.require("tasks:read")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        rows = session.execute(select(Order).order_by(Order.created_at.desc()).limit(100)).scalars()
+        return {"orders": [{"id": o.id, "channel": o.channel, "status": o.status, "is_test": o.is_test, "lines": o.lines, "total_minor": o.total_minor, "currency": o.currency,
+                            "external_order_id": o.external_order_id, "receipt_id": o.receipt_id, "run_id": o.run_id, "review_reasons": o.review_reasons,
+                            "created_at": o.created_at.isoformat()} for o in rows]}
 
 
 @router.get("/approvals")

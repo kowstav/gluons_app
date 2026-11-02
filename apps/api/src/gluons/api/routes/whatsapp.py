@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from gluons.api.deps import PrincipalDep
 from gluons.core import GluonsError
@@ -17,9 +17,26 @@ class Begin(BaseModel):
     capabilities: list[str] = Field(default_factory=lambda: ["read_messages"], max_length=10)
 
 
+class Signup(BaseModel):
+    """Returned by Meta's signup window. The code is single use and lives 30 seconds."""
+    model_config = ConfigDict(extra="forbid")
+    event: str = Field(max_length=60)
+    code: str | None = Field(default=None, max_length=2000)
+    messaging_account_ids: list[str] = Field(default_factory=list, max_length=10)
+    phone_number_id: str | None = Field(default=None, max_length=40)
+    business_id: str | None = Field(default=None, max_length=40)
+    is_on_biz_app: bool = False
+    pin: str | None = Field(default=None, max_length=6)
+
+
 @router.post("/v1/whatsapp/sessions", status_code=201)
 def begin_session(body: Begin, principal: PrincipalDep) -> dict:
     return service.begin_session(principal, capabilities=body.capabilities, account_type=body.account_type)
+
+
+@router.post("/v1/whatsapp/sessions/{session_id}/complete")
+def complete_signup(session_id: str, body: Signup, principal: PrincipalDep) -> dict:
+    return service.complete_signup(principal, session_id, body.model_dump())
 
 
 @router.get("/v1/webhooks/whatsapp")

@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     meta_app_secret: str | None = None
     meta_config_id: str | None = None
     meta_webhook_verify_token: str | None = None
-    meta_graph_version: str = "v24.0"
+    meta_graph_version: str = "v26.0"
 
     elevenlabs_api_key: str | None = None
     elevenlabs_webhook_secret: str | None = None

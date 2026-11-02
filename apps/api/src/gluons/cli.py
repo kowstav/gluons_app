@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import json
 import os
 import subprocess
 import sys
-import json
-import getpass
 
 from gluons.config import REPO_ROOT
 

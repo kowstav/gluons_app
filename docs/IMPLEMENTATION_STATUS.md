@@ -1,44 +1,50 @@
-# Implementation checkpoint — 2026-11-02
+# Implementation status — 2026-11-02
 
-Resume from actual source and test results. The blueprint remains the complete
-product target; this checkpoint is not a production-readiness declaration.
+Gluons runs locally end to end and is not production ready. No real provider account has been connected, nothing is deployed, and the images and CI have never run. Everything below is proven against real PostgreSQL, the labelled ERP simulator or labelled provider doubles only.
 
-Implemented locally:
+`docs/BLUEPRINT_TRACEABILITY.md` holds the row-by-row position, and `docs/TEST_RESULTS.md` holds the runs.
 
-- Verified-email identity, organizations, roles, MFA/recovery, browser sessions,
-  CSRF, forced tenant RLS, encrypted credential vault and append-only audit history.
-- Assistant OAuth with PKCE, scope/resource validation, rotating refresh tokens,
-  independent revocation and authenticated official-SDK Streamable HTTP MCP.
-- Persistent automation/run/step state, leases, retries, approvals, policy grants,
-  budgets, pause/cancel, write-ahead receipts and independent provider readback.
-- All 31 skill contracts; 30 explicitly draft-only with activation blocked.
-  Deterministic inventory, reconciliation and supplier calculations, OR-Tools
-  dispatch, bounded document extraction, and persistent commerce launch handoffs.
-- Owner-bound Gmail onboarding/confirmation/cancellation, encrypted tokens,
-  refresh and disconnect fencing. Gmail send adapter verifies Sent-mail readback;
-  an inconclusive timed-out send requires reconciliation rather than blind resend.
-- Four model-provider adapters, quality/data-provider gating, costs and fallback.
-  No model is automatically certified from the blueprint's prose fixtures.
-- Tenant knowledge, operational reports and labelled trial comparisons. Unknown
-  accuracy, time savings and ROI stay unknown. Empty trials cannot pass.
-- Responsive owner app wired to the real API. Desktop and Pixel 7 owner-flow
-  browser tests passed during implementation; see TEST_RESULTS for final runs.
-- Docker/Compose, local runner and GCP Terraform source. No cloud apply/deploy.
+## Working locally
 
-Still required:
+- **Identity:** verified email, businesses, roles, two-step sign-in with attempt limits, browser sessions, CSRF, forced tenant row level security, an encrypted vault and an append-only audit chain.
+- **Assistants:** OAuth with PKCE and resource binding, rotating refresh tokens, code replay revocation, independent revocation, and a remote MCP server with 47 tools.
+- **Runtime:** durable runs, leases, retries, dead letters, approvals, budgets with concurrency proof, pause and cancel, write-ahead receipts and independent readback.
+- **Skills:** all 31 contracts and the commerce playbook. The order skill runs end to end against the simulator. The other 30 produce review packets only, with deterministic domain constraints applied to every draft. See `docs/SKILL_CAPABILITIES.md`.
+- **Channels:** Gmail history sync and attachment ingestion, WhatsApp Embedded Signup, signed webhooks and the send gate, ElevenLabs post-call and tool intake, and phone route state. All three feed one order engine.
+- **Commerce:** Shopify OAuth, draft products, publication and fulfillment records with exact approval, supplier inquiries, and Shopify Payments status. Nothing here claims KYC, a live store or delivery.
+- **Models:** four provider adapters, evaluated routing, token and cost accounting, and fallback. No model is certified, so skills that need one stay blocked until evaluation evidence exists.
+- **Evidence:** labelled replay, shadow and supervised trials, measured versus estimated ROI, anomaly detection, and data export with deletion requests.
+- **Owner app:** every area of the mission has a screen backed by the real API, including messages, orders, data rights, assisted setup and business launch.
+- **Operations:** Terraform environments over modules, pinned Dockerfiles, CI and a manual deploy workflow, structured logging with redaction, an OIDC worker wake endpoint and runbooks.
 
-- Complete and test telephony webhook/tool routing and provider-observed call
-  verification; telephony source currently under development, not live verified.
-- Gmail watch/history reconciliation, attachment ingestion and authenticated push.
-- Official Meta onboarding, messaging window/template gates and webhooks.
-- Shopify OAuth, supplier outreach, payment status, checkout, publication and
-  fulfillment connectors. Commerce plans currently stop at explicit handoffs.
-- Full field-representative consent sessions, native chat, notifications delivery,
-  complete model evaluation fixtures and professional review for regulated skills.
-- Real provider sandbox tests, credential/provider approval gates, security review,
-  cloud infrastructure validation and authorized staging smoke/recovery drills.
+## Blocked on outside action
 
-Security fixes in this continuation include independent approval expiry checks,
-single-action approval reuse binding, cross-process action exclusion, separate
-lock connections to avoid pool starvation, and Cloud SQL-compatible worker RLS
-policies instead of a superuser-only BYPASSRLS attribute.
+Each needs something only the owner can provide. `docs/EXTERNAL_DEPENDENCIES.md` lists what to obtain.
+
+| Area | Needs |
+|---|---|
+| Gmail live test | Google OAuth client, consent test users, Pub/Sub topic |
+| WhatsApp live test | Approved Meta app, Embedded Signup configuration, test number |
+| Voice live test | ElevenLabs account, a number or SIP route, one real inbound call |
+| Shopify live test | App credentials and a development store |
+| Model use | At least one provider key, then evaluation runs |
+| Cloud deployment | Owner approval for chargeable resources |
+| CI | A GitHub remote |
+| Images | A running Docker daemon |
+
+## Not built
+
+- **Stripe status:** only Shopify Payments status is read. ADR-016 limits Stripe to Gluons' own billing and standalone merchants, so this waits for that decision.
+- **Deletion purge:** a deletion request closes access and destroys credentials, but no job erases the marked records yet. The response says so.
+- **Domain workflows for 30 skills:** each needs a provider action graph and real evidence before it can act.
+- **Per-IP rate limits outside the edge:** these depend on Cloud Armor, which is configured but not deployed.
+- **Trial measurement and supervised trial screens:** both work through REST and MCP, but the owner app has no form for them.
+
+## Unverified assumptions
+
+These were written from provider documentation and only exercised against doubles:
+
+- ElevenLabs may not return a conversation while the call is still running. Voice order intake reads it back during the call, so a real call may need a change.
+- Meta's popup behaviour with the app's `no-referrer` policy is unknown.
+- `shopify.fulfillment.create` needs a verified `shipping.shipment.dispatch` receipt, and no connector produces one yet, so it fails closed.
+- The ERP connector has only met the simulator, never a real ERPNext.

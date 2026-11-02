@@ -151,7 +151,10 @@ def login(email: str, password: str, *, ip: str | None = None, user_agent: str |
         if matched:
             if user.email_verified_at is None:
                 raise GluonsError("EMAIL_NOT_VERIFIED", "Verify your email address before signing in.", status=403)
-            user.failed_logins = 0
+            if user.mfa_enabled_at is None:
+                # With two-step on, only a correct code clears the count, or anyone holding the
+                # password could sign in again between guesses and never reach the limit.
+                user.failed_logins = 0
             user.locked_until = None
             return _create_session(session, user, ip, user_agent)
         # Returning normally commits the failure count, which raising here would roll back.
@@ -165,16 +168,26 @@ def login(email: str, password: str, *, ip: str | None = None, user_agent: str |
 def verify_mfa(session_token: str, code: str) -> None:
     with public_tx() as session:
         identity = _load_session(session, session_token)
-        user = session.get(User, identity.user_id)
+        user = session.get(User, identity.user_id, with_for_update=True)
         if user is None or user.mfa_secret_ref is None:
             raise conflict("Two-step verification is not enrolled.")
+        now = utcnow()
+        if user.locked_until is not None and user.locked_until > now:
+            raise GluonsError("ACCOUNT_LOCKED", "Too many attempts. Try again in a few minutes.", status=429)
         secret = vault.open_global(f"mfa:{user.id}", user.mfa_secret_ref)
-        if not pyotp.TOTP(secret).verify(code, valid_window=1):
-            hashed = token_hash(code.strip())
-            if hashed not in user.mfa_recovery_hashes:
-                raise GluonsError("AUTH_FAILED", "That code is not valid.", status=401)
+        hashed = token_hash(code.strip())
+        if pyotp.TOTP(secret).verify(code, valid_window=1) or hashed in user.mfa_recovery_hashes:
             user.mfa_recovery_hashes = [h for h in user.mfa_recovery_hashes if h != hashed]
-        identity.mfa_verified_at = utcnow()
+            user.failed_logins = 0
+            identity.mfa_verified_at = now
+            return
+        # Returning normally commits the failure count, which raising here would roll back.
+        user.failed_logins += 1
+        if user.failed_logins >= MAX_FAILED_LOGINS:
+            user.locked_until = now + LOCKOUT
+            user.failed_logins = 0
+            identity.revoked_at = now
+    raise GluonsError("AUTH_FAILED", "That code is not valid.", status=401)
 
 
 def begin_mfa_enrollment(user_id: str) -> dict[str, Any]:

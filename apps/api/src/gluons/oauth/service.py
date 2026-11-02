@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.orm import Session
 
 from gluons import audit, identity
@@ -100,6 +100,28 @@ def _scope_list(scope: str | None) -> list[str]:
     if not scopes or set(scopes) - set(ASSISTANT_SCOPES):
         raise OAuthError("invalid_scope", "Request only documented Gluons scopes.")
     return scopes
+
+
+STALE_AFTER = timedelta(days=1)
+MAX_PENDING_PER_CLIENT = 100
+
+
+def purge_stale() -> dict[str, int]:
+    """Anyone can register and start consent unauthenticated, so abandoned rows must not pile up."""
+    cutoff = utcnow() - STALE_AFTER
+    with system_tx() as session:
+        requests = session.execute(delete(OAuthAuthorizationRequest).where(OAuthAuthorizationRequest.expires_at < cutoff))
+        clients = session.execute(delete(OAuthClient).where(
+            OAuthClient.registration == "dcr", OAuthClient.created_at < cutoff,
+            ~exists().where(AgentBinding.client_id == OAuthClient.id),
+            ~exists().where(OAuthAuthorizationRequest.client_id == OAuthClient.id)))
+        return {"requests": requests.rowcount, "clients": clients.rowcount}
+
+
+def _within_limit(session: Any, column: Any, *conditions: Any, limit: int) -> None:
+    """A database ceiling that holds even before an edge rate limit exists."""
+    if session.scalar(select(func.count(column)).where(*conditions)) >= limit:
+        raise OAuthError("temporarily_unavailable", "Too many pending registrations. Try again later.")
 
 
 def register_client(data: dict[str, Any], *, client_id: str | None = None) -> dict[str, Any]:
@@ -214,6 +236,8 @@ def begin_authorization(*, client_id: str, redirect_uri: str, code_challenge: st
             raise OAuthError("invalid_client", "Register this assistant before authorization.")
         if redirect_uri not in client.redirect_uris:
             raise OAuthError("invalid_request", "The redirect URI is not registered for this client.")
+        _within_limit(session, OAuthAuthorizationRequest.id, OAuthAuthorizationRequest.client_id == client_id,
+                      OAuthAuthorizationRequest.created_at > utcnow() - timedelta(hours=1), limit=MAX_PENDING_PER_CLIENT)
         row = OAuthAuthorizationRequest(
             id=new_id("oar"), client_id=client_id, redirect_uri=redirect_uri, state=state, scopes=scopes,
             resource=resource_uri, code_challenge=code_challenge, code_challenge_method="S256",

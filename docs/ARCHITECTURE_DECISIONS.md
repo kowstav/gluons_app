@@ -95,3 +95,12 @@ Routing filters by capability, data-provider allowance and passing `model_eval_r
 
 ## ADR-021 Gmail watch needs a restricted scope
 `gmail.send` is sensitive, but `users.watch` and `history.list` need a restricted scope, so public launch requires Google verification and an annual CASA assessment. Test users work until then, and refresh tokens expire after 7 days while the OAuth app is in Testing status. The UI surfaces both limits.
+
+## ADR-024 Owner account consent sits outside the action gateway
+The gateway governs business actions taken for a tenant. Provider calls that only link or maintain the owner's own account are different: the Google and Meta token exchanges, Embedded Signup webhook subscription and number registration, and the Gmail watch. They run under a named `write_permit`, reachable only from an owner's browser session or a signed intake grant, and no skill, assistant or model can reach them. Shadow never creates a watch: it polls read-only.
+
+## ADR-025 One implementation for each capability
+Two lines of work built the same features. Kept: the stricter assist session (a representative's only write is a consented shadow trial), with per-representative trial scoping added; `chat.py` with sealed confirmations over the fixed-command assistant; the paged data export with an explicit column allowlist over the single-document export; `whatsapp/service.py` with Embedded Signup moved into it; `ci.yml` over `verify.yml`; and `scripts/dev.py` over the shell runners. A channel-specific intake also replaced the generic webhook inbox module, because each provider's proof and routing differ.
+
+## ADR-026 Attempt limits live in the database as well as at the edge
+Cloud Armor limits are configured but do not exist locally or before an edge is deployed. Password and second-factor failures share one per-account count, cleared for two-step accounts only by a correct code, so signing in again between guesses gains nothing. Pending consent is capped per client, and abandoned registrations are purged hourly. Per-IP limits remain the edge's job.

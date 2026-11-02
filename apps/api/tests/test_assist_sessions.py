@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -27,7 +28,7 @@ def rep(world):
 
 def active(world, rep, **consent):
     row = assist.request_session(rep)
-    return assist.consent(world.owner, row["id"], **consent)
+    return assist.consent(replace(world.owner, session_id="browser"), row["id"], **consent)
 
 
 def code_of(fn, *args, **kwargs) -> str:
@@ -54,9 +55,9 @@ def test_only_a_field_rep_can_request_and_only_the_owner_can_consent(world, rep)
     assert row["status"] == "requested" and row["consent"] == {}
     assert assist.request_session(rep)["id"] == row["id"]
     assert code_of(assist.consent, rep, row["id"], allow_shadow_trial=True) == "FORBIDDEN"
-    consented = assist.consent(world.owner, row["id"], allow_shadow_trial=True)
+    consented = assist.consent(replace(world.owner, session_id="browser"), row["id"], allow_shadow_trial=True)
     assert consented["status"] == "active" and consented["owner_consent_by"] == world.owner.actor_id
-    assert code_of(assist.consent, world.owner, row["id"]) == "CONFLICT"
+    assert code_of(assist.consent, replace(world.owner, session_id="browser"), row["id"]) == "CONFLICT"
 
 
 def test_assistants_can_neither_use_nor_consent_to_assist(world, rep):
@@ -130,7 +131,7 @@ def test_time_box_ends_the_session_durably(world, rep):
 def test_unconsented_request_expires_too(world, rep):
     row = assist.request_session(rep)
     age_session(world, row["id"])
-    assert code_of(assist.consent, world.owner, row["id"]) == "ASSIST_SESSION_EXPIRED"
+    assert code_of(assist.consent, replace(world.owner, session_id="browser"), row["id"]) == "ASSIST_SESSION_EXPIRED"
 
 
 def test_owner_revocation_stops_the_rep_immediately(world, rep):

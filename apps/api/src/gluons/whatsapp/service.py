@@ -1,14 +1,17 @@
 """Durable signed-webhook intake and owner-controlled Business Platform binding.
 
-Automated Embedded Signup remains disabled until the app's approved flow/version
-can be verified. An operator may bind an already-onboarded account from a local
-environment secret; web and assistant requests never accept provider credentials.
+Owners link through Embedded Signup v5 when the Meta app and configuration are set. Its
+browser code lives 30 seconds, so the page posts it at once and the exchange, webhook
+subscription and registration happen here. An operator may instead bind an already
+onboarded account from a local environment secret. Web and assistant requests never
+carry a provider credential.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
@@ -42,7 +45,7 @@ from gluons.db.models import (
     WebhookInbox,
 )
 from gluons.db.session import operation_lock, system_tx, tenant_tx
-from gluons.net import GuardedClient, HostNotAllowed, ResponseTooLarge
+from gluons.net import GuardedClient, HostNotAllowed, ResponseTooLarge, write_permit
 from gluons.runtime import lifecycle
 from gluons.whatsapp.provider import MetaClient, identifier
 
@@ -51,12 +54,31 @@ MAX_WEBHOOK_BYTES = 256 * 1024
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
 CHANNEL = "whatsapp"
 SUPPORTED_MEDIA = {"image", "audio", "document", "video", "sticker"}
+TERMS_RISK = ("WhatsApp terms section 4.7 bars AI providers whose AI is the primary functionality, at Meta's sole discretion. "
+              "Legal review is required before launch, and platform data may not train models.")
+CHARGES_NOTICE = ("Meta charges for service messages since 2026-10-01, after 1,000 free per number each month. "
+                  "The business must add its own payment method in WhatsApp Manager, or service messages stop.")
 
 
 def _browser(principal: Principal) -> None:
     principal.require("connections:manage")
     if principal.kind != "user" or not principal.session_id:
         raise GluonsError("OWNER_WEB_REQUIRED", "Continue WhatsApp account setup in Gluons Web.", status=403)
+
+
+def signup_enabled() -> bool:
+    settings = get_settings()
+    return bool(settings.meta_app_id and settings.meta_app_secret and settings.meta_config_id and settings.meta_webhook_verify_token)
+
+
+def _signup_details(session_id: str) -> dict:
+    """Everything the setup page needs. It holds no secret: the app ID is public."""
+    settings = get_settings()
+    return {"sdk_url": "https://connect.facebook.net/en_US/sdk.js",
+            "init": {"appId": settings.meta_app_id, "autoLogAppEvents": True, "xfbml": True, "version": settings.meta_graph_version},
+            "login_options": {"config_id": settings.meta_config_id, "response_type": "code", "override_default_response_type": True, "extras": {"version": "v5"}},
+            "message_event": {"origin_suffix": "facebook.com", "type": "WA_EMBEDDED_SIGNUP"}, "code_ttl_seconds": 30,
+            "complete_path": f"/v1/whatsapp/sessions/{session_id}/complete", "notices": [CHARGES_NOTICE, TERMS_RISK]}
 
 
 def begin_session(principal: Principal, *, capabilities: list[str] | None = None, account_type: str = "business_platform") -> dict:
@@ -70,16 +92,126 @@ def begin_session(principal: Principal, *, capabilities: list[str] | None = None
         row = ConnectionSession(id=new_id("cns"), tenant_id=principal.tenant_id, initiated_by=principal.actor_id,
                                 initiated_via="web", provider="whatsapp_business", requested_capabilities=capabilities,
                                 requested_scopes=SCOPES, setup_handle_hash=token_hash(new_secret_token()),
-                                state_hash=token_hash(new_secret_token()), status="needs_operator_verification",
-                                extra={"browser_session_id": principal.session_id, "signup": "approved_external_business_onboarding_required"},
+                                state_hash=token_hash(new_secret_token()), status="pending" if signup_enabled() else "needs_operator_verification",
+                                extra={"browser_session_id": principal.session_id, "signup": "embedded_signup_v5" if signup_enabled() else "approved_external_business_onboarding_required"},
                                 expires_at=utcnow() + timedelta(seconds=get_settings().connection_session_ttl_seconds))
         session.add(row)
         session.flush()
         audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="whatsapp.setup_requested", actor=principal,
                      resource_type="connection_session", resource_id=row.id, data={"capabilities": capabilities})
-        return {"session_id": row.id, "status": row.status, "provider": row.provider, "expires_at": row.expires_at.isoformat(),
-                "setup_url": f"{get_settings().public_web_url.rstrip('/')}/setup/{row.id}", "requested_scopes": SCOPES,
-                "next_step": "Complete approved Meta Business Platform onboarding; a local operator must verify the account and subscription. Automated Embedded Signup is not enabled."}
+        result = {"session_id": row.id, "status": row.status, "provider": row.provider, "expires_at": row.expires_at.isoformat(),
+                  "setup_url": f"{get_settings().public_web_url.rstrip('/')}/setup/{row.id}", "requested_scopes": SCOPES}
+        if row.status == "pending":
+            return {**result, "whatsapp_setup": _signup_details(row.id), "next_step": "Finish Meta's signup window. Gluons then asks you to confirm the number."}
+        return {**result, "next_step": "Embedded Signup is not configured. Complete approved Meta onboarding, then a local operator verifies the account and subscription."}
+
+
+def _exchange_code(code: str, transport: httpx.BaseTransport | None) -> dict:
+    """Meta takes the app secret as a query value here, so httpx request logging stays off."""
+    settings = get_settings()
+    client = GuardedClient(("graph.facebook.com",), transport=transport)
+    try:
+        response = client.get(f"https://graph.facebook.com/{settings.meta_graph_version}/oauth/access_token",
+                              params={"client_id": settings.meta_app_id, "client_secret": settings.meta_app_secret, "code": code})
+    except httpx.HTTPError as exc:
+        raise GluonsError("EXTERNAL_UNAVAILABLE", "Meta could not be reached. Start the connection again.", status=502) from exc
+    finally:
+        client.close()
+    try:
+        result = response.json()
+    except ValueError:
+        result = {}
+    if response.status_code >= 400 or not isinstance(result, dict) or not result.get("access_token"):
+        raise GluonsError("EXTERNAL_REJECTED", "Meta did not issue a business token. Start the connection again.", status=502)
+    return result
+
+
+def _provision(token: str, accounts: list[str], phone_number_id: str, coexistence: bool, pin: str | None,
+               transport: httpx.BaseTransport | None) -> dict:
+    """Owner account consent rather than business automation, like a Google token exchange."""
+    client = MetaClient(token, transport=transport)
+    try:
+        with write_permit("owner_whatsapp_onboarding"):
+            for account in accounts:
+                client.call("POST", f"{account}/subscribed_apps")
+            if not coexistence:
+                # Coexistence numbers stay registered to the Business app, and Meta says to skip this.
+                client.call("POST", f"{phone_number_id}/register", json={"messaging_product": "whatsapp", "pin": pin or f"{secrets.randbelow(1_000_000):06d}"})
+        return client.call("GET", phone_number_id, params={"fields": "display_phone_number,verified_name"})
+    finally:
+        client.close()
+
+
+def complete_signup(principal: Principal, session_id: str, signup: dict, *, transport: httpx.BaseTransport | None = None) -> dict:
+    """Binds the session to the browser that opened it. A failure is recorded and the code is spent."""
+    _browser(principal)
+    event = signup.get("event")
+    finished = event in ("FINISH", "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING")
+    accounts = [str(account) for account in signup.get("messaging_account_ids") or []]
+    phone_number_id = str(signup.get("phone_number_id") or "")
+    pin = signup.get("pin")
+    if finished:
+        if not signup.get("code") or not accounts or len(accounts) > 10:
+            raise GluonsError("VALIDATION_FAILED", "Signup did not return a code and a messaging account.", status=422)
+        try:
+            phone_number_id = identifier(phone_number_id)
+            accounts = [identifier(account) for account in accounts]
+        except ProviderError:
+            raise GluonsError("VALIDATION_FAILED", "Signup returned an invalid Meta identifier.", status=422) from None
+    if pin and not re.fullmatch(r"[0-9]{6}", str(pin)):
+        raise GluonsError("VALIDATION_FAILED", "The registration PIN must be 6 digits.", status=422)
+    coexistence = bool(signup.get("is_on_biz_app")) or event == "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"
+    failure: GluonsError | None = None
+    result: dict = {}
+    with operation_lock(f"whatsapp.bind:{phone_number_id or session_id}") as acquired:
+        if not acquired:
+            raise GluonsError("CONFLICT", "This number is being configured. Retry shortly.", status=409)
+        with system_tx() as session:
+            linked = session.scalars(select(Connection.tenant_id).where(Connection.provider == "whatsapp_business",
+                Connection.external_account_id == phone_number_id, Connection.disconnected_at.is_(None))).first() if finished else None
+        with tenant_tx(principal.tenant_id, principal.user_id) as session:
+            row = session.get(ConnectionSession, session_id, with_for_update=True)
+            if (row is None or row.provider != "whatsapp_business" or row.initiated_by != principal.actor_id
+                    or row.extra.get("browser_session_id") != principal.session_id or row.expires_at <= utcnow()
+                    or row.consumed_at or row.status != "pending"):
+                raise GluonsError("CONNECTION_SESSION_INVALID", "This setup expired, was already used, or belongs to another session.", status=409)
+            row.consumed_at = utcnow()
+            try:
+                if not finished:
+                    raise GluonsError("OAUTH_DECLINED", "WhatsApp setup was not finished. Start again when ready.", status=400)
+                if linked is not None:
+                    raise GluonsError("ACCOUNT_ALREADY_LINKED", "Disconnect the existing Gluons connection before relinking this number.", status=409)
+                credential = _exchange_code(str(signup["code"]), transport)
+                try:
+                    number = _provision(credential["access_token"], accounts, phone_number_id, coexistence, pin, transport)
+                except ProviderError as exc:
+                    raise GluonsError("PROVIDER_VERIFICATION_FAILED", "Meta refused an onboarding step. No connection was created.", status=409) from exc
+                reference = vault.store(session, principal.tenant_id, "whatsapp_business", {"access_token": credential["access_token"]})
+                expires_in = credential.get("expires_in")
+                connection = Connection(id=new_id("con"), tenant_id=principal.tenant_id, provider="whatsapp_business",
+                    environment=str((row.extra or {}).get("environment", "production")), external_account_id=phone_number_id,
+                    account_display=str(number.get("display_phone_number", phone_number_id)), granted_scopes=SCOPES, credential_ref=reference,
+                    status="connected", last_checked_at=utcnow(), created_by=principal.actor_id,
+                    token_expires_at=utcnow() + timedelta(seconds=int(expires_in)) if expires_in else None,
+                    metadata_json={"account_id": accounts[0], "account_ids": accounts, "phone_number_id": phone_number_id, "app_id": str(get_settings().meta_app_id),
+                                   "verified_name": str(number.get("verified_name", "")), "subscription_verified": True, "coexistence": coexistence,
+                                   "requested_capabilities": row.requested_capabilities, "api_version": get_settings().meta_graph_version,
+                                   "business_id": signup.get("business_id"), "client_payment_method": "unknown"})
+                session.add(connection)
+                session.flush()
+                row.status, row.connection_id = "authorized", connection.id
+                audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="whatsapp.account_verified", actor=principal,
+                             resource_type="connection", resource_id=connection.id, data={"account_ids": accounts, "phone_number_id": phone_number_id, "coexistence": coexistence})
+                result = {"connection_id": connection.id, "status": "authorized", "account_display": connection.account_display, "account_confirmed": False,
+                          "next_step": "Confirm the displayed number, then add a payment method in WhatsApp Manager.", "notices": [CHARGES_NOTICE, TERMS_RISK]}
+            except GluonsError as exc:
+                failure = exc
+                row.status, row.failure_reason = "failed", exc.message
+                audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="whatsapp.signup_failed", actor=principal,
+                             resource_type="connection_session", resource_id=row.id, data={"reason": exc.code})
+    if failure:
+        raise failure
+    return result
 
 
 def bind_from_environment(principal: Principal, session_id: str, *, account_id: str, phone_number_id: str,
@@ -232,7 +364,7 @@ def receive_webhook(raw: bytes, signature: str) -> dict:
                 routes = session.execute(select(Connection).where(Connection.provider == "whatsapp_business",
                     Connection.external_account_id == phone_id, Connection.status == "connected", Connection.disconnected_at.is_(None),
                     Connection.account_confirmed_at.is_not(None))).scalars().all()
-            if len(routes) != 1 or routes[0].metadata_json.get("account_id") != str(entry.get("id", "")):
+            if len(routes) != 1 or str(entry.get("id", "")) not in (routes[0].metadata_json.get("account_ids") or [routes[0].metadata_json.get("account_id")]):
                 continue
             connection = routes[0]
             for kind in ("messages", "statuses"):

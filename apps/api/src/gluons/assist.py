@@ -98,7 +98,7 @@ def request_session(principal: Principal) -> dict[str, Any]:
 def consent(principal: Principal, session_id: str, *, allow_shadow_trial: bool = False, allow_sample_data: bool = False) -> dict[str, Any]:
     """Owner only. Trial setup and real sample data are separate, explicit permissions."""
     principal.require("assist:consent")
-    if principal.kind != "user":
+    if principal.kind != "user" or not principal.session_id:
         raise forbidden("The owner consents in Gluons Web.")
 
     def grant(session: Session, row: AssistSession) -> dict[str, Any]:

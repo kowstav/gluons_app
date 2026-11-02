@@ -1,6 +1,5 @@
 """Knowledge, trials, and evidence-based reports for owner and supported assistants."""
 from __future__ import annotations
-from typing import Literal
 
 from typing import Any, Literal
 

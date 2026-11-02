@@ -877,6 +877,7 @@ class Notification(Base):
     resource_type: Mapped[str | None] = mapped_column(String(60))
     resource_id: Mapped[str | None] = mapped_column(String(300))
     read_at: Mapped[datetime | None] = _ts()
+    delivered_at: Mapped[datetime | None] = _ts()
     created_at: Mapped[datetime] = _created()
 
 

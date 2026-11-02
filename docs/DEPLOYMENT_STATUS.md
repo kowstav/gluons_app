@@ -1,32 +1,23 @@
 # Deployment status — 2026-11-02
 
-No cloud resources provisioned, no production deployment and no paid provider
-actions performed by this continuation.
+Nothing is deployed. No cloud resources exist, no paid provider action was taken, and no real credentials were used.
 
-Terraform CLI validation passed with checksum-verified Terraform 1.14.0 and signed
-Google provider 7.46.2. The provider dependency lock is committed. This verifies
-configuration syntax/schema; it does not verify GCP permissions, credentials,
-connectivity, migration execution, provider quotas or a deployed application.
+| Check | State |
+|---|---|
+| `terraform fmt -check` and `validate` for dev, staging and prod | Passed offline with Terraform 1.14.0 and Google provider 7.46.2 |
+| `terraform plan` or `apply` | Never run. Needs a project, credentials and owner approval. |
+| Docker image builds | Never run. The Docker daemon was unavailable. |
+| `docker compose config` | Passed earlier, on the Compose file before the operations merge |
+| GitHub Actions | Never run. There is no GitHub remote. Deploy is manual only. |
+| Migrations | Applied on embedded PostgreSQL in every test run, never on Cloud SQL |
+| Backups, restore, alerts | Configured in Terraform, never exercised |
 
-- Local API/worker/PostgreSQL and owner app are exercised through tests.
-- `docker compose config --quiet` passes. Docker image builds/container runtime
-  have not yet been verified; do not treat the manifest as a deployment receipt.
-- `infra/terraform` defines private Cloud SQL/VPC, Cloud Run API/web and worker,
-  migration/skill jobs, paused Scheduler, KMS, secret references, private evidence
-  storage, Pub/Sub, Cloud Tasks and alerts. Final CLI validation is recorded below
-  when available. Cloud Tasks wake delivery is not wired; PostgreSQL remains the
-  queue authority and scheduled worker jobs provide the reconciliation path.
-- No Terraform backend/state, provider credentials, domain, secrets or image
-  artifacts have been configured for a real environment.
+Validation proves the configuration is well formed. It does not prove permissions, quotas, connectivity or a working application.
 
-Before any approved staging deployment: validate infrastructure; use independent
-project/state per environment; populate Secret Manager outside Terraform; build
-scanned images; bootstrap restricted database login roles; run migration and skill
-jobs; verify readiness/RLS; then unpause worker scheduling. Migration secrets must
-not be injected into the API or worker. Budget alerts are notifications, not a
-hard cloud-spend cap.
+The per-environment roots have no committed `.terraform.lock.hcl`. Generate one with `terraform providers lock` for Linux and Windows before the first real plan, so CI and local runs agree.
 
-Cloud SQL does not expose superuser accounts. Migration 0007 grants explicit
-worker RLS policies and removes legacy BYPASSRLS. Application tenant isolation
-remains forced. Sources: [Cloud SQL role restrictions](https://docs.cloud.google.com/sql/docs/postgres/users),
-[scheduled Cloud Run jobs](https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule).
+Terraform defines private Cloud SQL and VPC, Cloud Run API, web and worker, migration and skill jobs, a paused scheduler, KMS, Secret Manager references, private evidence storage, Pub/Sub, Cloud Tasks, Cloud Armor and alerts. Each environment has its own identities with least privilege. Follow `docs/runbooks/deployment.md`.
+
+Budget alerts notify. They do not cap spending.
+
+Cloud SQL has no superuser, so migration 0007 gives the worker explicit row level security policies and removes `BYPASSRLS`. Tenant isolation stays forced for the application role. Sources: [Cloud SQL role restrictions](https://docs.cloud.google.com/sql/docs/postgres/users), [scheduled Cloud Run jobs](https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule).

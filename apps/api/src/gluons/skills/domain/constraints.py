@@ -18,7 +18,7 @@ REQUEST_FIELDS = ("request", "issue", "issue_description", "ticket", "work_order
                   "draft_text", "content", "marketing_brief", "brief", "post", "caption", "transcript")
 
 HAZARDS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("gas", re.compile(r"\bgas (leak|smell|odou?r)\b|\b(smell|smelling|odou?r)\w*\s+(of|like)\s+(natural\s+)?gas\b|\bleaking gas\b"
+    ("gas", re.compile(r"\bgas (leak|smell|odou?r)\b|\b(smell|odou?r)\w*\s+((of|like)\s+)?(natural\s+)?gas\b|\bleaking gas\b"
                        r"|\bcarbon monoxide\b|\bco (alarm|detector)\b", re.I)),
     ("flood", re.compile(r"\bflood(ed|ing|s)?\b|\b(burst|ruptured|broken)\s+(water\s+)?(pipe|main|line)\b"
                          r"|\bwater\s+(is\s+)?(pouring|gushing|everywhere)\b|\bsewage\s+(backup|back-up|overflow)\b", re.I)),

@@ -1,29 +1,39 @@
 # External configuration and verification
 
-No real provider credentials were requested through chat or used in automated
-provider-double tests. Copy `.env.example` to the ignored `.env` for local secrets.
-For hosted environments use Secret Manager secret versions and ADC/scoped service
-accounts. Inspect configuration presence without printing values.
+Never paste a secret into chat. Put local values in the git-ignored `.env`, copied from `.env.example`. Use Secret Manager versions and scoped service accounts when hosted. Setting a value here never spends money by itself, except where the table says so.
 
-| Service | Required configuration | Verification still required |
-|---|---|---|
-| Google Gmail | Web OAuth client ID/secret, Gmail API, consent screen/test users; exact `/v1/oauth/gmail/callback` URL | Real browser consent, refresh/revoke, send/readback; restricted-scope review/security assessment before public release |
-| ElevenLabs/telephony | API key, separate tool and post-call secrets, authorized agent and supported inbound number/SIP route | Genuine inbound call, route ownership/forwarding evidence, transfer/fallback, signed post-call event and shared approved order |
-| WhatsApp | Approved Meta app/business onboarding, config ID, app secret, webhook token | Connector implementation, business entitlement, signatures, templates/service window, review of applicable platform terms |
-| Shopify | Merchant-owned store, reviewed app distribution and app OAuth credentials | Implement and test OAuth/catalog/webhooks/fulfillment. Signup/transfer and merchant terms remain owner/provider actions |
-| Payments | Eligible provider/country and merchant-owned onboarding | Implement status verification; KYC/banking/approval cannot be self-asserted |
-| ERPNext | Authorized customer/sandbox endpoint and restricted API account | Simulator tests do not verify ERPNext itself |
-| Models | OpenAI/Anthropic API keys, Gemini ADC/project or permitted private endpoint | Reviewed dated descriptors/prices and machine-graded per-skill model evaluation evidence; live calls and invoice reconciliation |
-| Email delivery | Approved SMTP transport/domain | Deliverability and recovery tests outside local file transport |
-| GCP | Separate projects, billing/region, ADC/WIF, domains/TLS, Secret Manager versions, DB roles | Explicit approval before chargeable provisioning/deployment; migrations, staging smoke, backups/restore and monitoring drills |
+Nothing below has been tested against the real provider. Provider-double tests prove Gluons' handling only.
 
-Obtain Google credentials in Google Cloud Console's APIs & Services/OAuth client
-configuration. Authorize the exact callback and add consent-screen test users.
-Gmail read and send are separate capabilities; verified-send recovery also needs
-readonly access. Do not enable broad modify/delete scopes for order processing.
-Official sources: [OAuth web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server),
-[Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes).
+## Worth doing first
 
-Do not connect production customer data until domain/privacy/retention requirements
-and provider approvals are satisfied. Skills in legal, tax, health, insurance and
-other regulated domains remain administrative drafts requiring qualified review.
+Google is the cheapest real proof: one OAuth client gives a live Gmail test at no cost. A model key comes next, because evaluation runs unlock model-backed skills.
+
+## What each service needs
+
+| Service | Where to get it | Settings | Then verify |
+|---|---|---|---|
+| Google Gmail | Google Cloud Console, APIs & Services: enable Gmail API, add consent test users, create a Web OAuth client with the exact `/v1/oauth/gmail/callback` URL | `GLUONS_GOOGLE_*` | Consent, refresh, revoke, send with Sent readback |
+| Gmail push (optional) | Pub/Sub topic with Gmail's publisher granted, plus an authenticated push subscription | `GLUONS_GMAIL_PUBSUB_TOPIC`, `GLUONS_GMAIL_PUSH_AUDIENCE`, `GLUONS_GMAIL_PUSH_SERVICE_ACCOUNT` | Watch renewal and a real notification. Polling works without this. |
+| Models | Provider consoles, or Gemini through ADC on a Google Cloud project | `.env.example` model section | Live calls, then evaluation runs per skill |
+| WhatsApp | Meta for Developers: app, WhatsApp product, Embedded Signup configuration. Business verification is needed for real use. | `GLUONS_META_APP_ID`, `GLUONS_META_APP_SECRET`, `GLUONS_META_CONFIG_ID`, `GLUONS_META_WEBHOOK_VERIFY_TOKEN` | Signup popup, signed webhook, service window, template send |
+| Voice | ElevenLabs workspace with an agent, and a number it can receive on. Twilio sells no India numbers (ADR-012), so use Exotel or SIP there. | `GLUONS_ELEVENLABS_API_KEY`, `GLUONS_ELEVENLABS_WEBHOOK_SECRET`, `GLUONS_ELEVENLABS_TOOL_SECRET` | One real inbound call, a signed post-call event, a shared order |
+| Shopify | Partner Dashboard: an app and a development store | `GLUONS_SHOPIFY_CLIENT_ID`, `GLUONS_SHOPIFY_CLIENT_SECRET`, `GLUONS_SHOPIFY_PILOT_SHOPS` | OAuth, draft, webhook, payment status |
+| Carrier tracking | Shippo API token | `GLUONS_SHIPPO_API_TOKEN` | Only needed once a dispatch connector exists |
+| ERPNext | An authorized sandbox and a restricted API user | `GLUONS_ERPNEXT_BASE_URL` plus the connection flow | Write and readback against real ERPNext |
+| Email delivery | An SMTP provider and a verified domain | `GLUONS_SMTP_URL` | Deliverability. Local file mail proves nothing about this. |
+| GitHub | Create the remote, then push | None in this app | CI runs for the first time. Deploy stays manual. |
+| Google Cloud | Separate projects, billing, region, domains | `terraform.tfvars` per environment | **Chargeable.** Needs explicit owner approval before any apply. |
+
+Prefer Application Default Credentials and scoped service accounts over downloaded keys.
+
+## Approvals only a business or person can give
+
+- **Google:** restricted-scope verification and an annual CASA assessment before public Gmail use (ADR-021).
+- **Meta:** business verification, app review, and legal review of WhatsApp terms section 4.7, which bars AI-primary providers at Meta's discretion. Meta also charges for service messages after a free tier.
+- **Shopify:** public app review. Until then, pilot shops only (ADR-015).
+- **Professional review:** legal, tax, health, insurance, appraisal and title skills stay administrative drafts until a qualified person reviews them.
+- **KYC, banking and store ownership** stay with the merchant and provider. Gluons records status and never completes them.
+
+Do not connect production customer data until privacy, retention and these approvals are settled.
+
+Sources: [OAuth web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server), [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes). Provider facts are in `docs/research/`.
