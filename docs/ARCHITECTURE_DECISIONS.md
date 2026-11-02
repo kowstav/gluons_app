@@ -1,5 +1,21 @@
 # Architecture decisions
 
+## ADR-022 Cloud SQL-compatible worker authority (supersedes ADR-003 role attribute)
+Cloud SQL does not expose PostgreSQL superusers, and PostgreSQL requires a superuser
+to grant BYPASSRLS. Fresh migration 0002 creates the system role without this
+attribute; migration 0007 grants explicit system_access RLS policies to that separate
+role and removes legacy local BYPASSRLS. The app role remains forced through tenant
+RLS. Append-only grants/triggers are unchanged. Hosted Cloud SQL execution remains
+untested until an authorized staging deployment.
+
+## ADR-023 Cross-process action exclusion
+An action-scoped PostgreSQL session advisory lock covers authorization, provider
+execution and readback, including the gap between write-ahead receipt transactions.
+It uses an independent NullPool connection so holders cannot exhaust the app pool.
+Contenders return retry. Process death releases the lock; durable receipts still
+require provider lookup before recovery. Gmail missing search results never prove
+that an ambiguous send failed, so they require human reconciliation.
+
 Each entry records a decision and, where it departs from the blueprint, why. Provider facts were checked on 2026-11-02 and are detailed in `docs/research/`.
 
 ## ADR-001 Modular monolith plus workers

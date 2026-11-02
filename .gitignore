@@ -50,5 +50,6 @@ crash.log
 # Editors / OS
 .vscode/
 .idea/
+.tools/
 .DS_Store
 Thumbs.db
