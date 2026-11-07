@@ -34,6 +34,8 @@ def database():
     from gluons.skills.registry import get_registry
 
     get_settings.cache_clear()
+    # Every test client shares one address. test_security_hardening turns limits back on.
+    get_settings().rate_limits_enabled = False
     reset_engines()
     get_registry.cache_clear()
     yield db

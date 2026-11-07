@@ -20,7 +20,9 @@ Never fix an incident by editing audit history, resending a write by hand, or ca
 |---|---|---|
 | Run shows `reconciliation_required` | A write's result is unknown | Let `reconcile.sweep` look it up. Never resend while a receipt is pending. |
 | Incident opened from a dead letter | A job used up its retries | Read the diagnosis, fix the cause, then resolve the incident. |
-| Connection `needs_reauth` | A provider refused the stored token | The owner reconnects. Grants stay separate and are checked again. |
+| Connection `needs_reauth` | A provider refused the stored token, found by an action or the 6-hourly health check | The owner reconnects the same account, which keeps its history. Grants stay separate and are checked again. |
+| Many `RATE_LIMITED` answers | One address passed a per-route limit in `ratelimit.py` | Check `GLUONS_TRUSTED_PROXY_HOPS` first. A wrong value makes every user share one address. |
+| Shopify `app/uninstalled` | The merchant removed the app | Nothing to fix. The owner reinstalls from Shopify to reconnect. |
 | Gmail `watch_expired` | Renewal stopped | Check the grant, the Pub/Sub topic and the connection, then let `gmail.maintain` renew it. |
 | WhatsApp event `quarantined` | The connection was unavailable when it was processed | Reconnect, then requeue the inbox row after checking the event is still wanted. |
 | Phone route `awaiting_carrier_evidence` | The call reached the agent, but forwarding is unproven | The owner supplies carrier evidence. A successful call does not prove forwarding. |

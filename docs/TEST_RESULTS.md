@@ -2,6 +2,36 @@
 
 Results are recorded from actual runs, newest first. Provider-double tests are labelled as such and prove Gluons' handling only, not the provider integration.
 
+## Account connections and remaining work (2026-11-07)
+
+All runs are from the final commit of this round.
+
+| Check | Result |
+|---|---|
+| Backend suite, real embedded PostgreSQL as the restricted role, real HTTP ERP simulator | **694 passed**, 0 failed, 0 skipped, 420 s |
+| Playwright against the real API and PostgreSQL, desktop Chromium and Pixel 7 | **2 passed**, 72 s |
+| `next build` and `tsc --noEmit` | Passed |
+| Ruff across `apps/api` | Passed |
+| Traceability | 83 requirements, 0 problems: 13 done, 58 partial, 12 blocked, 0 not started |
+| `terraform validate` with provider locks for dev, staging and prod | Passed |
+
+New coverage, all against labelled provider doubles:
+
+- **Shopify-initiated installs:** signature, timestamp and browser binding; a single-use claim; one store per business; no token minted on reopen; expiry and purge.
+- **Shopify webhooks:** uninstall, the three privacy topics with replay-proof body shapes, and app-level order routing.
+- **Refresh and health:** Shopify refresh classification, and the health check for Gmail, Shopify and WhatsApp.
+- **Redirects:** provider failures land back in Gluons Web instead of a raw JSON page.
+- **Per-address limits:** a spoofed `X-Forwarded-For` entry is ignored.
+- **Deletion purge:** grace period, erasure, kept history and an intact audit chain.
+
+Problems found and fixed during this round:
+
+- **Security:** the install flow did not bind OAuth to the browser that opened the app, so a lured owner could finish someone else's install. Fixed, with a test.
+- **Test isolation:** Shopify tests reused one shop domain across businesses, which the new one-store-one-business rule correctly refuses. Each test now has its own store.
+- **Test selector:** a new browser assertion matched Next.js's route announcer as well as the notice. It now targets the notice text.
+
+Docker Desktop did not start unattended, so no image was built and no real ERPNext test ran.
+
 ## Integrated build (2026-11-02)
 
 All runs are from one commit after merging the agent branches with the GPT checkpoint.

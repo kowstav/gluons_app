@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     migration_database_url: str = "postgresql+psycopg://postgres@127.0.0.1:5433/gluons"
 
     public_api_url: str = "http://localhost:8000"
+    # Proxies in front of the API that append to X-Forwarded-For. Zero trusts no header.
+    trusted_proxy_hops: int = 0
+    rate_limits_enabled: bool = True
+    # Days between an owner's deletion request and the purge, so a mistaken request can still be exported.
+    deletion_grace_days: int = 30
     public_web_url: str = "http://localhost:3000"
     allowed_web_origins: str = "http://localhost:3000"
 
@@ -86,6 +91,8 @@ class Settings(BaseSettings):
     shopify_client_secret: str | None = None
     shopify_api_version: str = "2026-10"
     shopify_pilot_shops: str = ""
+    # The App Store listing or install link owners use to start from Shopify.
+    shopify_install_url: str | None = None
 
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None

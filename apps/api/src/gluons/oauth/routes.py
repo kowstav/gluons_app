@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from gluons.api.deps import PrincipalDep
 from gluons.oauth import service
+from gluons.ratelimit import limited
 
 
 class OAuthRoute(APIRoute):
@@ -52,12 +53,12 @@ class Registration(BaseModel):
 
 
 @router.post("/oauth/register", status_code=201)
-def register(body: Registration) -> dict[str, Any]:
+def register(body: Registration, _: None = limited("oauth_register")) -> dict[str, Any]:
     return service.register_client(body.model_dump())
 
 
 @router.get("/oauth/authorize")
-def authorize(request: Request) -> RedirectResponse:
+def authorize(request: Request, _: None = limited("oauth_authorize")) -> RedirectResponse:
     params = request.query_params
     if any(len(params.getlist(key)) != 1 for key in params):
         raise service.OAuthError("invalid_request", "Duplicate authorization parameters are not supported.")
@@ -94,7 +95,7 @@ async def _form(request: Request) -> dict[str, str]:
 
 
 @router.post("/oauth/token")
-async def token(request: Request) -> dict[str, Any]:
+async def token(request: Request, _: None = limited("oauth_token")) -> dict[str, Any]:
     form = await _form(request)
     if request.headers.get("authorization") or form.get("client_secret"):
         raise service.OAuthError("invalid_client", "Use a public PKCE client with client_id in the form.")

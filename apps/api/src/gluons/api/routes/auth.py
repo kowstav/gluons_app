@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr, Field
 from gluons import identity
 from gluons.api.deps import SessionDep, session_token
 from gluons.config import get_settings
+from gluons.ratelimit import limited
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -56,19 +57,19 @@ def _set_cookies(response: Response, issued: identity.IssuedSession) -> None:
 
 
 @router.post("/register", status_code=202)
-def register(body: RegisterBody) -> dict[str, str]:
+def register(body: RegisterBody, _: None = limited("register")) -> dict[str, str]:
     identity.register(body.email, body.password, body.display_name)
     return {"status": "check_email"}
 
 
 @router.post("/verify-email")
-def verify_email(body: TokenBody) -> dict[str, str]:
+def verify_email(body: TokenBody, _: None = limited("verify_email")) -> dict[str, str]:
     identity.verify_email(body.token)
     return {"status": "verified"}
 
 
 @router.post("/login")
-def login(body: LoginBody, request: Request, response: Response) -> dict[str, Any]:
+def login(body: LoginBody, request: Request, response: Response, _: None = limited("login")) -> dict[str, Any]:
     issued = identity.login(
         body.email,
         body.password,
@@ -80,7 +81,7 @@ def login(body: LoginBody, request: Request, response: Response) -> dict[str, An
 
 
 @router.post("/mfa/verify")
-def mfa_verify(body: MfaBody, request: Request) -> dict[str, str]:
+def mfa_verify(body: MfaBody, request: Request, _: None = limited("mfa")) -> dict[str, str]:
     identity.verify_mfa(session_token(request) or "", body.code)
     return {"status": "signed_in"}
 
@@ -105,13 +106,13 @@ def session(view: SessionDep) -> dict[str, Any]:
 
 
 @router.post("/password-reset/request", status_code=202)
-def password_reset_request(body: ResetRequestBody) -> dict[str, str]:
+def password_reset_request(body: ResetRequestBody, _: None = limited("password_reset")) -> dict[str, str]:
     identity.request_password_reset(body.email)
     return {"status": "check_email"}
 
 
 @router.post("/password-reset/confirm")
-def password_reset_confirm(body: ResetConfirmBody) -> dict[str, str]:
+def password_reset_confirm(body: ResetConfirmBody, _: None = limited("password_reset")) -> dict[str, str]:
     identity.reset_password(body.token, body.new_password)
     return {"status": "password_changed"}
 

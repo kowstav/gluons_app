@@ -70,8 +70,32 @@ def _deliver_notifications(job: Job, worker_id: str) -> None:
     events.deliver_urgent()
 
 
+@handler("connections.health")
+def _connection_health(job: Job, worker_id: str) -> None:
+    from gluons.connections.health import check_all
+    check_all()
+
+
+@handler("housekeeping.purge")
+def _housekeeping(job: Job, worker_id: str) -> None:
+    """Rows anyone can create without signing in: consent requests, installs and rate counts."""
+    from gluons import ratelimit
+    from gluons.commerce.install import purge_stale as purge_installs
+    from gluons.oauth.service import purge_stale as purge_oauth
+    purge_oauth()
+    purge_installs()
+    ratelimit.purge()
+
+
+@handler("organizations.purge")
+def _purge_organizations(job: Job, worker_id: str) -> None:
+    from gluons.deletion import purge_due
+    purge_due()
+
+
 @handler("oauth.purge")
 def _purge_oauth(job: Job, worker_id: str) -> None:
+    """Kept so jobs queued before the housekeeping rename still run."""
     from gluons.oauth.service import purge_stale
     purge_stale()
 
@@ -230,7 +254,7 @@ def drain(worker_id: str = "drain", *, max_rounds: int = 100) -> int:
     return total
 
 
-PERIODIC: dict[str, int] = {"approvals.expire": 60, "reconcile.sweep": 300, "outbox.publish": 15, "gmail.maintain": 300, "notifications.deliver": 60, "oauth.purge": 3600}
+PERIODIC: dict[str, int] = {"approvals.expire": 60, "reconcile.sweep": 300, "outbox.publish": 15, "gmail.maintain": 300, "notifications.deliver": 60, "housekeeping.purge": 3600, "connections.health": 21600, "organizations.purge": 3600}
 
 
 def scheduler_tick() -> None:

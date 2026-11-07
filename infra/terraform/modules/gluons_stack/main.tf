@@ -35,9 +35,12 @@ locals {
 
   runtime_env = merge(var.plain_env, {
     # config.py knows only staging and production as hosted, so dev runs with staging rules.
-    GLUONS_ENV                        = var.environment == "dev" ? "staging" : var.environment
-    GLUONS_PUBLIC_API_URL             = local.api_url
-    GLUONS_PUBLIC_WEB_URL             = local.web_url
+    GLUONS_ENV            = var.environment == "dev" ? "staging" : var.environment
+    GLUONS_PUBLIC_API_URL = local.api_url
+    GLUONS_PUBLIC_WEB_URL = local.web_url
+    # The external Application Load Balancer appends "<client>, <load balancer>" to
+    # X-Forwarded-For. Confirm the logged client address on first deploy (deployment runbook).
+    GLUONS_TRUSTED_PROXY_HOPS         = "2"
     GLUONS_ALLOWED_WEB_ORIGINS        = local.web_url
     GLUONS_GCP_PROJECT_ID             = var.project_id
     GLUONS_GCP_REGION                 = var.region

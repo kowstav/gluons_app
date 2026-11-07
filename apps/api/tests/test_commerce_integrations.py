@@ -25,6 +25,13 @@ from gluons.net import SideEffectBlocked, write_permit
 from helpers import World
 
 SHOP = "gluons-pilot.myshopify.com"
+
+
+@pytest.fixture(autouse=True)
+def fresh_shop():
+    """A store feeds one business, so each test needs a store of its own."""
+    global SHOP
+    SHOP = f"gluons-pilot-{new_id('s').split('_')[1][:12]}.myshopify.com"
 INPUT = {"title": "Verified cotton shirt", "vendor": "Authorized Supplier", "description_text": "Cotton shirt",
          "source_evidence": ["https://supplier.example/catalog/shirt"]}
 

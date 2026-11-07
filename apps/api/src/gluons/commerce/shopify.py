@@ -1,11 +1,15 @@
 """Pinned Shopify Admin API boundary. No arbitrary hosts or GraphQL from model input."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from datetime import timedelta
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gluons import vault
@@ -28,6 +32,48 @@ def shop_domain(value: str) -> str:
 def configured() -> bool:
     settings = get_settings()
     return bool(settings.shopify_client_id and settings.shopify_client_secret)
+
+
+def callback_url() -> str:
+    return f"{get_settings().public_api_url.rstrip('/')}/v1/commerce/shopify/callback"
+
+
+def authorize_url(shop: str, scopes: list[str], state: str) -> str:
+    return f"https://{shop_domain(shop)}/admin/oauth/authorize?" + urlencode({
+        "client_id": get_settings().shopify_client_id, "scope": ",".join(scopes), "state": state, "redirect_uri": callback_url()})
+
+
+def verify_query(parameters: list[tuple[str, str]], *, required: tuple[str, ...] = ()) -> dict[str, str]:
+    """Shopify signs the query it sends to the app URL and to the OAuth callback. The signature
+    is checked before any value in it is trusted, the shop included."""
+    params = dict(parameters)
+    if len(parameters) != len(params) or not all(params.get(key) for key in ("hmac", "timestamp", "shop", *required)):
+        raise GluonsError("OAUTH_CALLBACK_INVALID", "The Shopify request is incomplete.", status=400)
+    secret = get_settings().shopify_client_secret
+    if not secret:
+        raise GluonsError("CONFIGURATION_REQUIRED", "Configure the Shopify app credentials.", status=409)
+    message = "&".join(f"{key}={value}" for key, value in sorted(params.items()) if key != "hmac")
+    digest = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(digest, params["hmac"]):
+        raise GluonsError("OAUTH_SIGNATURE_INVALID", "The Shopify request signature is invalid.", status=400)
+    try:
+        fresh = abs(utcnow().timestamp() - int(params["timestamp"])) <= 300
+    except (ValueError, OverflowError):
+        fresh = False
+    if not fresh:
+        raise GluonsError("OAUTH_CALLBACK_EXPIRED", "This Shopify request has expired. Open Gluons from Shopify again.", status=400)
+    shop_domain(params["shop"])
+    return params
+
+
+def token_metadata(result: dict) -> dict[str, str]:
+    """A refresh token lasts at most 90 days and cannot be renewed once it lapses, so its expiry
+    is kept where the health check can see it without opening the vault."""
+    try:
+        lifetime = int(result.get("refresh_token_expires_in") or 0)
+    except (TypeError, ValueError):
+        lifetime = 0
+    return {"refresh_token_expires_at": (utcnow() + timedelta(seconds=lifetime)).isoformat()} if lifetime > 0 else {}
 
 
 def request(shop: str, method: str, path: str, *, token: str | None = None, read_only: bool = False,
@@ -76,25 +122,48 @@ def exchange(shop: str, code: str) -> dict:
     return result
 
 
-def get_credential(session: Session, tenant_id: str, connection: Connection) -> dict:
+def get_credential(session: Session, tenant_id: str, connection: Connection, *, force_refresh: bool = False,
+                   transport: httpx.BaseTransport | None = None) -> dict:
     if connection.provider != "shopify" or connection.status != "connected" or connection.disconnected_at or not connection.credential_ref:
         raise GluonsError("CONNECTION_REQUIRED", "Reconnect the Shopify store.", status=409)
+    if not (force_refresh or _expiring(connection)):
+        return vault.read(session, tenant_id, connection.credential_ref)
+    # A refresh retires the token it presents, so two workers refreshing one store at once would
+    # leave the slower one holding a dead token. Lock the row, then look again.
+    session.execute(select(Connection).where(Connection.id == connection.id).with_for_update()
+                    .execution_options(populate_existing=True))
+    if connection.status != "connected" or not connection.credential_ref:
+        raise GluonsError("CONNECTION_REQUIRED", "Reconnect the Shopify store.", status=409)
     credential = vault.read(session, tenant_id, connection.credential_ref)
-    if connection.token_expires_at and connection.token_expires_at <= utcnow() + timedelta(seconds=60):
-        if not credential.get("refresh_token"):
-            raise GluonsError("CONNECTION_REAUTH_REQUIRED", "Reconnect Shopify to renew store access.", status=409)
-        settings = get_settings()
+    if not (force_refresh or _expiring(connection)):
+        return credential
+    if not credential.get("refresh_token"):
+        raise GluonsError("CONNECTION_REAUTH_REQUIRED", "Reconnect Shopify to renew store access.", status=409)
+    settings = get_settings()
+    try:
         with write_permit("shopify_credential_refresh"):
             result = request(shop_domain(connection.metadata_json["shop"]), "POST", "/admin/oauth/access_token", data={
                 "client_id": settings.shopify_client_id, "client_secret": settings.shopify_client_secret,
                 "grant_type": "refresh_token", "refresh_token": credential["refresh_token"],
-            })
-        if not result.get("access_token") or not result.get("refresh_token") or int(result.get("expires_in", 0)) <= 0:
-            raise GluonsError("CONNECTION_REAUTH_REQUIRED", "Shopify credential renewal was incomplete. Reconnect.", status=409)
-        credential = {**credential, **result}
-        vault.replace(session, tenant_id, connection.credential_ref, credential)
-        connection.token_expires_at = utcnow() + timedelta(seconds=int(result["expires_in"]))
+            }, read_only=True, transport=transport)
+    except ProviderError as exc:
+        if exc.kind in ("auth", "permanent"):
+            # Shopify answers a lapsed refresh token with 401 invalid_request. Only the owner can fix that.
+            raise GluonsError("CONNECTION_REAUTH_REQUIRED", "Shopify no longer accepts this store's access. Reconnect the store.", status=409) from exc
+        # A presented refresh token stays valid until its successor is used, so retrying a
+        # timeout or 5xx with the same token is safe. It is never an ambiguous business write.
+        raise ProviderError("retryable", "Shopify could not renew store access. It will be retried.") from exc
+    if not result.get("access_token") or not result.get("refresh_token") or int(result.get("expires_in", 0)) <= 0:
+        raise GluonsError("CONNECTION_REAUTH_REQUIRED", "Shopify credential renewal was incomplete. Reconnect.", status=409)
+    credential = {**credential, **result}
+    vault.replace(session, tenant_id, connection.credential_ref, credential)
+    connection.token_expires_at = utcnow() + timedelta(seconds=int(result["expires_in"]))
+    connection.metadata_json = {**connection.metadata_json, **token_metadata(result)}
     return credential
+
+
+def _expiring(connection: Connection) -> bool:
+    return bool(connection.token_expires_at and connection.token_expires_at <= utcnow() + timedelta(seconds=60))
 
 
 def identity(shop: str, token: str) -> dict:

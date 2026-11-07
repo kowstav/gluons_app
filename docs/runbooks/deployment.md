@@ -13,6 +13,8 @@ Nothing here has been run against Google Cloud yet. Each step needs the owner's 
 7. Run the migration job, then the skills job.
 8. Check `/ready`, then confirm that every table in `TENANT_TABLES` shows forced row level security in `pg_class` on the new database.
 9. Unpause the worker scheduler last.
+10. Sign in once and check the logged client address against your own. If every request shows the load balancer's address, `GLUONS_TRUSTED_PROXY_HOPS` is wrong, and the per-address limits would treat all users as one.
+11. Register the provider URLs in `docs/ACCOUNT_CONNECTIONS.md` with Google, Shopify, Meta and ElevenLabs.
 
 ## Later releases
 

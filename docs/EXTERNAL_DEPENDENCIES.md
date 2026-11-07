@@ -17,11 +17,13 @@ Google is the cheapest real proof: one OAuth client gives a live Gmail test at n
 | Models | Provider consoles, or Gemini through ADC on a Google Cloud project | `.env.example` model section | Live calls, then evaluation runs per skill |
 | WhatsApp | Meta for Developers: app, WhatsApp product, Embedded Signup configuration. Business verification is needed for real use. | `GLUONS_META_APP_ID`, `GLUONS_META_APP_SECRET`, `GLUONS_META_CONFIG_ID`, `GLUONS_META_WEBHOOK_VERIFY_TOKEN` | Signup popup, signed webhook, service window, template send |
 | Voice | ElevenLabs workspace with an agent, and a number it can receive on. Twilio sells no India numbers (ADR-012), so use Exotel or SIP there. | `GLUONS_ELEVENLABS_API_KEY`, `GLUONS_ELEVENLABS_WEBHOOK_SECRET`, `GLUONS_ELEVENLABS_TOOL_SECRET` | One real inbound call, a signed post-call event, a shared order |
-| Shopify | Partner Dashboard: an app and a development store | `GLUONS_SHOPIFY_CLIENT_ID`, `GLUONS_SHOPIFY_CLIENT_SECRET`, `GLUONS_SHOPIFY_PILOT_SHOPS` | OAuth, draft, webhook, payment status |
+| Shopify | Shopify Dev Dashboard: an app set up from `infra/shopify/shopify.app.toml.example`, a development store, and protected customer data access for order webhooks | `GLUONS_SHOPIFY_CLIENT_ID`, `GLUONS_SHOPIFY_CLIENT_SECRET`, `GLUONS_SHOPIFY_INSTALL_URL`, optional `GLUONS_SHOPIFY_PILOT_SHOPS` | Install from Shopify, claim in Gluons, draft, webhooks, uninstall, payment status |
 | Carrier tracking | Shippo API token | `GLUONS_SHIPPO_API_TOKEN` | Only needed once a dispatch connector exists |
 | ERPNext | An authorized sandbox and a restricted API user | `GLUONS_ERPNEXT_BASE_URL` plus the connection flow | Write and readback against real ERPNext |
 | Email delivery | An SMTP provider and a verified domain | `GLUONS_SMTP_URL` | Deliverability. Local file mail proves nothing about this. |
 | GitHub | Create the remote, then push | None in this app | CI runs for the first time. Deploy stays manual. |
+| Docker | Open Docker Desktop once on this machine. It did not start unattended. | None | Build the three images and run `docker compose up`, then a real ERPNext for the order skill |
+| Legal pages | A privacy policy and a data deletion instructions page on your domain | Links in the Google consent screen and the Meta app | Required for Google verification and Meta App Review |
 | Google Cloud | Separate projects, billing, region, domains | `terraform.tfvars` per environment | **Chargeable.** Needs explicit owner approval before any apply. |
 
 Prefer Application Default Credentials and scoped service accounts over downloaded keys.

@@ -1,0 +1,32 @@
+# Template for the Gluons Shopify app (docs/ACCOUNT_CONNECTIONS.md).
+# Copy into the app you create in the Shopify Dev Dashboard, replace api.example.com with the
+# deployed Gluons API host, and deploy it with Shopify CLI. Nothing here is a secret: the client
+# secret goes only in GLUONS_SHOPIFY_CLIENT_SECRET.
+
+client_id = "REPLACE_WITH_CLIENT_ID"
+name = "Gluons"
+application_url = "https://api.example.com/v1/commerce/shopify/install"
+embedded = false
+
+[access_scopes]
+# Gluons requests these on Shopify's approval screen through the authorization code grant.
+scopes = "read_products,read_orders"
+# UNVERIFIED: whether a non-embedded app must opt out of managed installation with this flag.
+# Check the current Shopify CLI app configuration reference before deploying.
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = ["https://api.example.com/v1/commerce/shopify/callback"]
+
+[webhooks]
+api_version = "2026-10"
+
+# Order topics need approved protected customer data access first.
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled", "orders/create", "orders/paid", "orders/updated"]
+uri = "https://api.example.com/v1/commerce/shopify/webhooks"
+
+# Mandatory for App Store apps.
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "https://api.example.com/v1/commerce/shopify/webhooks"

@@ -104,3 +104,14 @@ Two lines of work built the same features. Kept: the stricter assist session (a 
 
 ## ADR-026 Attempt limits live in the database as well as at the edge
 Cloud Armor limits are configured but do not exist locally or before an edge is deployed. Password and second-factor failures share one per-account count, cleared for two-step accounts only by a correct code, so signing in again between guesses gains nothing. Pending consent is capped per client, and abandoned registrations are purged hourly. Per-IP limits remain the edge's job.
+
+## ADR-027 Shopify installs start in Shopify and bind after sign-in
+**Blueprint:** owners connect a store from Gluons by naming it.
+**Current:** Shopify requires a public or unlisted app to start from a Shopify surface, run OAuth first, and never ask for a store domain (ADR-015).
+**Decision:** the app URL verifies Shopify's signature, gives that browser a short-lived cookie, and runs OAuth before Gluons knows the owner. Only the browser holding that cookie can finish the callback, which stops a lured owner from completing someone else's install. The token is sealed against a 30-minute install record, and that browser alone holds a one-time HttpOnly claim cookie. A signed-in owner then binds the store to their current business. A store binds to one business, and reopening the app never mints a token that would retire the live one. Typing a shop domain stays for operator-approved pilots only. Uninstall and the three compliance topics arrive at one app-level endpoint, routed by the signed body, and each body must match its topic exactly so none can be replayed as another.
+
+## ADR-028 Lapsing access is found before an automation needs it
+Google refresh tokens can be revoked, or expire weekly while a consent screen is in testing. Shopify refresh tokens lapse 90 days after issue, and Meta business tokens may expire with no renewal API. A health check every 6 hours renews or verifies each connection. A refused grant becomes `needs_reauth` with one urgent email, and an expiring Meta token gets a warning 7 days ahead. Refreshing a Shopify token is serialized per store and classified as retryable on timeouts, because Shopify keeps a presented refresh token valid until its successor is used.
+
+## ADR-029 Deletion purges after a grace period and keeps signed history
+A deletion request closes access at once. After `GLUONS_DELETION_GRACE_DAYS` (default 30), the purge deletes leaf business records and clears the content of rows that kept history points to: runs, approvals, automations, plans and business facts. Audit events, approval decisions, run events, usage and action receipts stay as the accountability record, and the audit chain still verifies afterwards. How long that record is kept needs legal review per jurisdiction.

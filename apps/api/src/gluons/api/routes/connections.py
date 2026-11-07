@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from gluons.api.deps import PrincipalDep
 from gluons.config import get_settings
 from gluons.connections import service
+from gluons.core import GluonsError
 
 router = APIRouter(prefix="/v1", tags=["connections"])
 
@@ -37,8 +38,13 @@ def authorize(session_id: str, principal: PrincipalDep) -> dict:
 
 @router.get("/oauth/gmail/callback")
 def callback(principal: PrincipalDep, state: str = Query(min_length=20, max_length=300), code: str | None = Query(default=None, max_length=4096), error: str | None = Query(default=None, max_length=200)) -> RedirectResponse:
-    result = service.callback(principal, state=state, code=code, error=error)
-    return RedirectResponse(f"{get_settings().public_web_url.rstrip('/')}/setup/{result['session_id']}", status_code=303)
+    web = get_settings().public_web_url.rstrip("/")
+    try:
+        result = service.callback(principal, state=state, code=code, error=error)
+    except GluonsError as exc:
+        # Google sends the owner's browser here, so a failure goes back to Gluons Web.
+        return RedirectResponse(f"{web}/connections?connection_error={exc.code}", status_code=303)
+    return RedirectResponse(f"{web}/setup/{result['session_id']}", status_code=303)
 
 
 @router.post("/connections/sessions/{session_id}/cancel")

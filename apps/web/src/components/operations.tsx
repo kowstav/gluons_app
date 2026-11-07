@@ -23,7 +23,7 @@ export function BusinessLaunch({ can }: { can: (p: string) => boolean }) {
     <Section title="Connect a merchant-owned Shopify store"><form className="inline-form" onSubmit={e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.currentTarget)); action.run(async () => { const result = await api<Row>("/v1/commerce/shopify/sessions", { method: "POST", body: { shop: f.shop, capabilities: ["read_catalog", "stage_catalog", "monitor_orders"], plan_id: selected?.id || null } }); if (typeof result.authorization_url === "string") window.location.assign(result.authorization_url); return result; }); }}><label className="grow">Approved pilot shop domain<input name="shop" required placeholder="your-store.myshopify.com" /></label><button className="button secondary" disabled={action.busy || !can("connections:manage")}>Review Shopify authorization</button></form><p className="small-print">Owner signup or Partner transfer happens in Shopify. Connection is currently restricted to operator-approved pilot shops. Public distribution and live checkout require separate provider approval.</p></Section><Result value={action.result} /></div>;
 }
 
-function MetaSignup({ setup, onDone }: { setup: Row; onDone: (result: unknown) => void }) {
+export function MetaSignup({ setup, onDone }: { setup: Row; onDone: (result: unknown) => void }) {
   const [state, setState] = useState("Loading Meta's signup window.");
   const init = setup.init as Row; const options = setup.login_options as Row; const event = setup.message_event as Row;
   useEffect(() => { const script = document.createElement("script"); script.src = String(setup.sdk_url); script.async = true; script.onload = () => setState(""); script.onerror = () => setState("Meta's signup window could not load. Check that nothing is blocking it, then try again."); document.body.appendChild(script); return () => script.remove(); }, [setup.sdk_url]);
@@ -101,4 +101,57 @@ export function DataRights({ can, organization }: { can: (p: string) => boolean;
     {allowed && <Section title="Download"><p className="body-copy">Each download is one dataset. Provider credentials are never included.</p><div className="button-row">{datasets.map(d => <button className="button secondary" key={d} disabled={action.busy} onClick={() => action.run(() => download(d))}>{d.replaceAll("_", " ")}</button>)}</div>{saved && <p className="small-print" role="status">{saved}</p>}</Section>}
     {can("org:delete") && <Section title="Close this business"><p className="body-copy">This stops every automation and disconnects every account straight away. Business records are then marked for deletion, not erased: signed history is kept, and the result lists what stays.</p><form className="form-grid" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); action.run(() => api("/v1/organizations/current/delete-request", { method: "POST", body: { confirm_name: f.get("confirm_name"), export_acknowledged: f.get("export_acknowledged") === "on" } })); }}><label>Type {organization} to confirm<input name="confirm_name" required autoComplete="off" /></label><label className="checkbox-label"><input type="checkbox" name="export_acknowledged" required /> I have downloaded what I need</label><button className="button danger-outline" disabled={action.busy}>Request deletion</button></form></Section>}
     <Result value={action.result} /></div>;
+}
+
+const CONNECTION_NOTICES: Record<string, string> = {
+  OAUTH_DECLINED: "You stopped at the provider's page. Nothing was connected.",
+  OAUTH_STATE_INVALID: "That sign-in link expired or was already used. Start the connection again.",
+  OAUTH_CALLBACK_EXPIRED: "The provider answered too late. Start the connection again.",
+  OAUTH_SIGNATURE_INVALID: "The provider's answer could not be verified, so nothing was connected.",
+  SCOPE_INSUFFICIENT: "The provider did not grant everything Gluons asked for. Start again and allow each requested permission.",
+  ACCOUNT_ALREADY_LINKED: "That account is connected to another Gluons business. Disconnect it there first.",
+  CONFIGURATION_REQUIRED: "This provider is not set up on this Gluons server yet.",
+  EXTERNAL_UNAVAILABLE: "The provider did not respond. Try again in a few minutes.",
+  AUTH_REQUIRED: "Sign in to Gluons, then start the connection again.",
+  ORG_REQUIRED: "Choose a business, then start the connection again.",
+};
+
+export function ConnectionNotice() {
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search); const code = params.get("connection_error");
+    if (code) setNotice(CONNECTION_NOTICES[code] ?? `The connection did not complete (${code.replaceAll("_", " ").toLowerCase()}).`);
+    else if (params.get("shopify") === "connected") setNotice("This Shopify store is already connected to Gluons. Manage it below.");
+  }, []);
+  return notice ? <div className="error-box" role="alert">{notice}</div> : null;
+}
+
+export function ProviderConnect({ provider, can }: { provider: string; can: (p: string) => boolean }) {
+  const action = useAction(); const [signup, setSignup] = useState<Row | null>(null); const [options, setOptions] = useState<Row | null>(null);
+  useEffect(() => { if (provider === "shopify") api<Row>("/v1/commerce/shopify/connect-options").then(setOptions).catch(() => setOptions(null)); }, [provider]);
+  const allowed = can("connections:manage");
+  if (provider === "whatsapp_business") return <div className="provider-connect"><button className="button secondary" disabled={action.busy || !allowed} onClick={() => action.run(async () => { const result = await api<Row>("/v1/whatsapp/sessions", { method: "POST", body: { account_type: "business_platform", capabilities: ["read_messages"] } }); setSignup((result.whatsapp_setup as Row | undefined) ?? null); return result; })}>Connect WhatsApp Business</button>{signup && <MetaSignup setup={signup} onDone={result => { setSignup(null); action.run(async () => result); }} />}<Feedback error={action.error} /><Result value={action.result} /></div>;
+  if (provider === "shopify") return <div className="provider-connect">{options?.install_url ? <a className="button secondary" href={String(options.install_url)} rel="noopener">Install Gluons from Shopify</a> : <p className="small-print">{options?.configured ? "Open Gluons from your Shopify admin, or use the install link you were sent. Shopify brings you back here to choose the business." : "Shopify is not set up on this Gluons server yet."}</p>}{options?.pilot_shops_enabled === true && <form className="inline-form" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); action.run(async () => { const result = await api<Row>("/v1/commerce/shopify/sessions", { method: "POST", body: { shop: f.get("shop"), capabilities: ["read_catalog", "monitor_orders"] } }); if (typeof result.authorization_url === "string") window.location.assign(result.authorization_url); return result; }); }}><label className="grow">Approved pilot shop<input name="shop" required placeholder="your-store.myshopify.com" /></label><button className="button secondary" disabled={action.busy || !allowed}>Connect pilot shop</button></form>}<Feedback error={action.error} /></div>;
+  if (provider === "elevenlabs") return <Link className="button secondary" href="/channels">Set up a phone route</Link>;
+  return null;
+}
+
+export function ShopifyClaim({ id, organization }: { id: string; organization: string }) {
+  const action = useAction(); const [install, setInstall] = useState<Row | null>(null); const [done, setDone] = useState<Row | null>(null);
+  useEffect(() => { action.run(async () => { setInstall(await api<Row>(`/v1/commerce/shopify/installs/${encodeURIComponent(id)}`)); return null; }); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <div className="operations-page"><div className="page-title"><div><div className="eyebrow">FROM SHOPIFY</div><h1>Connect your store</h1><p>Choose the Gluons business that receives this store.</p></div></div><Feedback error={action.error} />
+    {install && !done && <Section title={String(install.store_name ?? install.shop)}><p className="body-copy">{String(install.shop)} · {String(install.environment)}</p><p className="body-copy">Shopify granted: {(install.scopes as string[]).join(", ")}</p><p className="small-print">This connects the store to <strong>{organization}</strong>. To use another business, switch business first. Connecting grants no permission to act: you confirm the store next, and each automation still needs your approval.</p><button className="button primary" disabled={action.busy} onClick={() => action.run(async () => { setDone(await api<Row>(`/v1/commerce/shopify/installs/${encodeURIComponent(id)}/claim`, { method: "POST" })); return null; })}>Connect to {organization}</button></Section>}
+    {done && <Section title="Store connected"><p className="body-copy">{String(done.next_step)}</p><Link className="button primary" href="/connections">Go to Connections</Link></Section>}
+    {!install && !done && action.error && <p className="small-print">An install link works once, for 30 minutes, in the browser that installed the app. Open Gluons from Shopify again to start over.</p>}</div>;
+}
+
+export function TrialEvidence({ automationId, version, status, mode, trials, can, onChange }: { automationId: string; version: number; status: string; mode: string; trials: Row[]; can: (p: string) => boolean; onChange: () => Promise<void> }) {
+  const action = useAction();
+  const running = trials.filter(t => t.status === "running");
+  const supervised = status === "active" && mode === "supervised";
+  if (!can("trials:write") || (!running.length && !supervised)) return null;
+  return <div className="operation-grid">
+    {running.length > 0 && <Section title="Record a measurement"><p className="small-print">Time studies and correction counts, each labelled by basis. Estimated figures never mix with measured ones.</p><form className="form-grid" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); action.run(async () => { const result = await api(`/v1/trials/${encodeURIComponent(String(f.get("trial")))}/measurements`, { method: "POST", body: { metric: f.get("metric"), value: Number(f.get("value")), unit: f.get("unit"), basis: f.get("basis"), source: f.get("source") } }); await onChange(); return result; }); }}><label>Trial<select name="trial">{running.map(t => <option key={String(t.id)} value={String(t.id)}>{String(t.mode).replaceAll("_", " ")} · {String(t.id)}</option>)}</select></label><label>Metric<input name="metric" required maxLength={100} placeholder="minutes_per_order" /></label><label>Value<input name="value" type="number" min="0" step="any" required /></label><label>Unit<input name="unit" required maxLength={40} placeholder="minutes" /></label><label>Basis<select name="basis"><option value="measured">Measured</option><option value="estimated">Estimated</option><option value="unverified">Unverified</option></select></label><label>Source<input name="source" required maxLength={2000} placeholder="Stopwatch study of 12 orders" /></label><button className="button secondary" disabled={action.busy}>Record measurement</button></form></Section>}
+    {supervised && <Section title="Supervised trial"><p className="small-print">Measures live operation while every action still waits for your approval. Your signed policy is what permits it.</p><button className="button secondary" disabled={action.busy} onClick={() => action.run(async () => { const result = await api(`/v1/automations/${encodeURIComponent(automationId)}/supervised-trial`, { method: "POST", body: { expected_version: version } }); await onChange(); return result; })}>Start supervised trial</button></Section>}
+    <Feedback error={action.error} /><Result value={action.result} /></div>;
 }

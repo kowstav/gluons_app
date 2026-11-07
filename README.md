@@ -51,5 +51,5 @@ this repository's provider-double tests. Never paste credentials into chat.
 
 Read [implementation status](docs/IMPLEMENTATION_STATUS.md),
 [external dependencies](docs/EXTERNAL_DEPENDENCIES.md),
-[assistant setup](docs/ASSISTANT_SETUP.md) and
+[assistant setup](docs/ASSISTANT_SETUP.md), [account connections](docs/ACCOUNT_CONNECTIONS.md) and
 [deployment status](docs/DEPLOYMENT_STATUS.md) before enabling external actions.

@@ -1,18 +1,21 @@
-"""Organization deletion requests, an owner action in Gluons Web.
+"""Organization deletion requests, an owner action in Gluons Web, and the purge that follows.
 
-A request stops everything that can act and destroys credentials straight away. It does not
-erase records: no purge job exists yet, and the append-only history tables reject deletes by
-design. The response says exactly that, so a reader is never told data is gone while it is
-still stored. Owners download their data first through `data_export`.
+A request stops everything that can act and destroys credentials straight away. After the grace
+period the purge erases business records. Signed history stays: the append-only tables reject
+deletes by design, and the rows they point to keep their identity with their content cleared.
+Each response says exactly what is gone and what is kept. Owners export first through
+`data_export`.
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, literal_column, select, update
 
 from gluons import audit, policy, vault
 from gluons.authz import Principal
+from gluons.config import get_settings
 from gluons.connections import service as connections
 from gluons.core import conflict, forbidden, not_found, utcnow, validation_failed
 from gluons.db.models import (
@@ -147,7 +150,7 @@ def request_deletion(principal: Principal, *, confirm_name: str, export_acknowle
         "completed_now": {"emergency_stop_engaged": True, "connections_disconnected": disconnected, "assistants_revoked": assistants,
                           "policies_revoked": policies, "automations_fenced": automations, **marked},
         "needs_manual_action": manual, "retained": retained,
-        "not_done": ["Business records are marked and access is closed, but the rows are still stored. No purge job exists yet.",
+        "not_done": [f"Business records are marked and access is closed now. They are erased {get_settings().deletion_grace_days} days after this request.",
                      "There is no self-service way to reverse this request.",
                      "Actions already completed at providers are not undone, and sent messages cannot be recalled."],
         "retention_notice": "Audit and transaction history is kept as required for accountability. Retention periods need legal review per jurisdiction.",
@@ -157,3 +160,63 @@ def request_deletion(principal: Principal, *, confirm_name: str, export_acknowle
                      resource_type="organization", resource_id=principal.tenant_id,
                      data={"completed_now": report["completed_now"], "needs_manual_action": manual, "erasure_completed": False})
     return report
+
+
+# Leaf business content, deleted children first. Nothing kept points at these rows.
+PURGED = ("channel_messages", "channel_threads", "calls", "orders", "customers", "catalog_items", "knowledge_documents", "artifacts",
+          "supplier_quotes", "suppliers", "launch_evidence", "launch_plans", "trial_measurements", "trials", "step_runs",
+          "notifications", "incidents", "budget_holds", "api_idempotency", "provider_event_subscriptions", "connection_sessions",
+          "phone_routes", "connections", "oauth_tokens", "agent_bindings", "vault_secrets", "invitations", "assist_sessions")
+# Kept history points at these rows, so they stay with their content cleared.
+SCRUBBED = {"runs": ("input", "state", "outcome", "error"),
+            "approvals": ("summary", "records_before", "records_after_preview", "source_evidence", "resolution"),
+            "automations": ("config", "trigger", "model_policy"),
+            "plans": ("goal", "business_context", "graph", "required_connections", "side_effects", "cost_estimate"),
+            "organizations": ("business_facts",)}
+# Workers may carry rows for any tenant; the app role cannot delete from them.
+SYSTEM_PURGED = ("jobs", "outbox", "webhook_inbox")
+
+
+def _cleared(column: Any) -> Any:
+    if column.server_default is not None:
+        return literal_column("DEFAULT")
+    return None if column.nullable else "[erased]"
+
+
+def purge(tenant_id: str) -> dict[str, int]:
+    """Erases one deleted business. Safe to repeat: a finished purge returns nothing."""
+    from gluons.db.session import system_tx
+    tables = Base.metadata.tables
+    counts: dict[str, int] = {}
+    with tenant_tx(tenant_id) as session:
+        organization = session.get(Organization, tenant_id, with_for_update=True)
+        if organization is None or organization.deleted_at is None or organization.purged_at is not None:
+            return {}
+        for name in PURGED:
+            table = tables[name]
+            counts[name] = session.execute(table.delete().where(table.c.tenant_id == tenant_id)).rowcount
+        for name, columns in SCRUBBED.items():
+            table = tables[name]
+            key = table.c.id if name == "organizations" else table.c.tenant_id
+            counts[f"{name}_cleared"] = session.execute(table.update().where(key == tenant_id).values(
+                {column: _cleared(table.c[column]) for column in columns})).rowcount
+        organization.purged_at = utcnow()
+    with system_tx() as session:
+        for name in SYSTEM_PURGED:
+            table = tables[name]
+            counts[name] = session.execute(table.delete().where(table.c.tenant_id == tenant_id)).rowcount
+    with tenant_tx(tenant_id) as session:
+        audit.record(session, tenant_id=tenant_id, category="data", event_type="organization.purged", actor="deletion_purge",
+                     resource_type="organization", resource_id=tenant_id, data={"counts": counts, "kept": sorted(RETAINED_TABLES)})
+    return counts
+
+
+def purge_due() -> int:
+    from gluons.db.session import system_tx
+    cutoff = utcnow() - timedelta(days=get_settings().deletion_grace_days)
+    with system_tx() as session:
+        due = session.scalars(select(Organization.id).where(Organization.deleted_at.is_not(None), Organization.deleted_at < cutoff,
+                                                            Organization.purged_at.is_(None))).all()
+    for tenant_id in due:
+        purge(tenant_id)
+    return len(due)

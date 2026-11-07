@@ -137,6 +137,42 @@ class OAuthAuthorizationRequest(Base):
     created_at: Mapped[datetime] = _created()
 
 
+class ShopifyInstall(Base):
+    """A Shopify-initiated install, held until the owner signs in to Gluons and picks a business.
+
+    Global because it exists before any business does. The token stays sealed and readable by
+    no tenant. The claim secret lives only in a cookie on the browser that installed the app.
+    """
+
+    __tablename__ = "shopify_installs"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    shop: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # The browser that opened the app URL. Only it may finish OAuth, so nobody can lure an owner
+    # into finishing an install of someone else's store.
+    browser_hash: Mapped[str | None] = mapped_column(String(64))
+    claim_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="authorizing")
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    credential_sealed: Mapped[str | None] = mapped_column(Text)
+    shop_identity: Mapped[dict] = _json()
+    claimed_tenant_id: Mapped[str | None] = mapped_column(String(40))
+    connection_id: Mapped[str | None] = mapped_column(String(40))
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = _ts(False)
+    claimed_at: Mapped[datetime | None] = _ts()
+
+
+class RateLimit(Base):
+    """Fixed-window counts for unauthenticated endpoints, keyed by route and client address."""
+
+    __tablename__ = "rate_limits"
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    window_start: Mapped[datetime] = _ts(False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+
 class SkillVersion(Base):
     """Validated skill contract, pinned by hash. Automations reference a version."""
 
@@ -286,6 +322,7 @@ class Organization(Base):
     monthly_budget_usd: Mapped[Any | None] = mapped_column(Numeric(12, 2))
     created_at: Mapped[datetime] = _created()
     deleted_at: Mapped[datetime | None] = _ts()
+    purged_at: Mapped[datetime | None] = _ts()
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
 

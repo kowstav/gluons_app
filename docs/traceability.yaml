@@ -23,11 +23,14 @@
   lockout: null
   password reset: null
   owner: core
-  status: partial
+  status: done
   code:
   - apps/api/src/gluons/identity.py
+  - apps/api/src/gluons/ratelimit.py
   tests:
   - apps/api/tests/test_core_identity.py
+  - apps/api/tests/test_security_hardening.py
+  - apps/api/tests/test_account_connections.py
 - id: ID-04
   source: doc14
   requirement: TOTP MFA with recovery codes
@@ -172,20 +175,28 @@
   source: doc13
   requirement: Connection verify and disconnect with dependent automations fenced
   owner: connectors
-  status: partial
+  status: done
   code:
   - apps/api/src/gluons/connections/service.py
+  - apps/api/src/gluons/connections/health.py
+  - apps/api/src/gluons/commerce/service.py
   tests:
   - apps/api/tests/test_connections.py
+  - apps/api/tests/test_account_connections.py
 - id: CN-04
   source: doc13
   requirement: Google OAuth for Gmail with least scopes
   owner: connectors
-  status: partial
+  status: blocked
   code:
   - apps/api/src/gluons/connections/service.py
+  - apps/api/src/gluons/connections/google.py
+  - apps/api/src/gluons/connections/health.py
   tests:
   - apps/api/tests/test_connections.py
+  - apps/api/tests/test_account_connections.py
+  blocker: Google OAuth client and consent screen test users; restricted-scope verification and CASA before
+    public launch.
 - id: CN-05
   source: doc13
   requirement: Gmail watch history cursor resync and renewal
@@ -275,18 +286,23 @@
   - apps/api/src/gluons/commerce/service.py
   - apps/api/src/gluons/commerce/shopify.py
   - apps/api/src/gluons/connectors/shopify.py
+  - apps/api/src/gluons/commerce/install.py
   tests:
   - apps/api/tests/test_commerce_integrations.py
-  blocker: Shopify app credentials and a development store; public distribution needs Shopify review.
+  - apps/api/tests/test_account_connections.py
+  blocker: Shopify app credentials, a development store and protected customer data access; public distribution
+    needs Shopify review.
 - id: CN-13
   source: doc14
   requirement: Payment provider status-only adapter
   owner: connectors
-  status: partial
+  status: blocked
   code:
   - apps/api/src/gluons/commerce/shopify.py
   tests:
   - apps/api/tests/test_commerce_integrations.py
+  blocker: Owner decision on becoming a Stripe Connect platform (ADR-016). Shopify Payments status is
+    read today.
 - id: CN-14
   source: doc12
   requirement: ERP connector with idempotent write and readback
@@ -639,9 +655,11 @@
   source: doc13
   requirement: Connections and setup pages on mobile
   owner: web
-  status: partial
+  status: done
   code:
   - apps/web/src
+  - apps/web/src/components/operations.tsx
+  - apps/web/src/components/console.tsx
   tests:
   - apps/web/tests/owner-flow.spec.ts
 - id: WB-05
@@ -796,6 +814,8 @@
   - docs/runbooks/deployment.md
   - docs/runbooks/secrets_and_webhooks.md
   - infra/terraform/modules/observability/main.tf
+  - apps/api/src/gluons/connections/health.py
+  - docs/ACCOUNT_CONNECTIONS.md
   tests:
   - apps/api/tests/test_observability_logging.py
   - apps/api/tests/test_observability_redaction.py

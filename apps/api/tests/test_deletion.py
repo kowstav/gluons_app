@@ -94,7 +94,7 @@ def test_deletion_disconnects_fences_marks_and_keeps_the_audit_trail(world, erp)
 
     assert report["status"] == "deletion_requested" and report["erasure_completed"] is False
     assert report["completed_now"]["emergency_stop_engaged"] is True
-    assert any("still stored" in line for line in report["not_done"])
+    assert any("erased 30 days after" in line for line in report["not_done"])
     assert report["needs_manual_action"][0]["provider"] == "erpnext"
     assert {row["table"] for row in report["retained"]} >= {"audit_events", "approval_decisions", "usage_events", "action_receipts"}
 
@@ -167,3 +167,49 @@ def test_vault_secret_is_truly_unreadable_after_deletion(world):
     with tenant_tx(world.tenant_id) as session, pytest.raises(Exception):  # noqa: B017, PT011 - any refusal is acceptable
         vault.read(session, world.tenant_id, secret)
 
+
+def _age_request(tenant_id: str, days: int) -> None:
+    from datetime import timedelta
+
+    from gluons.core import utcnow
+    with tenant_tx(tenant_id) as session:
+        session.get(Organization, tenant_id).deleted_at = utcnow() - timedelta(days=days)
+
+
+def test_purge_waits_for_the_grace_period(world, erp):
+    populated(world, erp)
+    deletion.request_deletion(world.owner, confirm_name="Acme Foods", export_acknowledged=True)
+    deletion.purge_due()
+    with tenant_tx(world.tenant_id) as session:
+        assert session.get(Organization, world.tenant_id).purged_at is None
+        assert session.execute(select(KnowledgeDocument)).first() is not None
+
+
+def test_purge_erases_business_records_and_keeps_signed_history(world, erp):
+    from gluons.db.models import ActionReceipt, AuditEvent, Run
+
+    populated(world, erp)
+    other = World.create("Other Business")
+    knowledge.add_document(other.owner, title="Kept", body="Another business keeps this.")
+    deletion.request_deletion(world.owner, confirm_name="Acme Foods", export_acknowledged=True)
+    with tenant_tx(world.tenant_id) as session:
+        receipts = len(session.execute(select(ActionReceipt.id)).all())
+        audit_before = len(session.execute(select(AuditEvent.id)).all())
+    _age_request(world.tenant_id, 31)
+    assert deletion.purge_due() >= 1
+    with tenant_tx(world.tenant_id) as session:
+        assert session.get(Organization, world.tenant_id).purged_at is not None
+        for model in (KnowledgeDocument, Customer, Connection, VaultSecret, Invitation, AgentBinding):
+            assert session.execute(select(model)).first() is None, model.__tablename__
+        runs = session.execute(select(Run)).scalars().all()
+        assert runs and all(run.input == {} and run.state == {} for run in runs)
+        assert all(automation.config == {} for automation in session.execute(select(Automation)).scalars())
+        assert len(session.execute(select(ActionReceipt.id)).all()) == receipts
+        events = session.execute(select(AuditEvent.event_type)).scalars().all()
+        assert len(events) > audit_before and "organization.purged" in events
+    assert deletion.purge(world.tenant_id) == {}
+    with tenant_tx(other.tenant_id) as session:
+        assert [d.title for d in session.execute(select(KnowledgeDocument)).scalars()] == ["Kept"]
+    # Clearing content must never break the signed audit chain.
+    with tenant_tx(world.tenant_id) as session:
+        assert audit.verify_chain(session, world.tenant_id)["valid"] is True

@@ -84,6 +84,10 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByRole("button", { name: "Review setup requirements" }).first().click();
   await expect(page.getByText("needs configuration", { exact: true })).toBeVisible();
   await expect(page.getByText(/Configure Google Web OAuth client/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect WhatsApp Business", exact: true })).toBeVisible();
+  await expect(page.getByText("Shopify is not set up on this Gluons server yet.")).toBeVisible();
+  await page.goto("/connections?connection_error=OAUTH_DECLINED");
+  await expect(page.getByText("You stopped at the provider's page. Nothing was connected.")).toBeVisible();
   await navigate(page, "Activity");
   await expect(page.getByText("automation · created", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Verify audit chain", exact: true }).click();

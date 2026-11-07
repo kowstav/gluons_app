@@ -7,12 +7,12 @@ import hmac
 import json
 import re
 from datetime import timedelta
-from urllib.parse import urlencode
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 
-from gluons import approvals, audit, gateway, vault
+from gluons import approvals, audit, events, gateway, vault
 from gluons.authz import Principal
 from gluons.commerce import shopify
 from gluons.config import get_settings
@@ -88,10 +88,7 @@ def begin_session(principal: Principal, *, shop: str, capabilities: list[str], p
                      actor=principal, resource_type="connection_session", resource_id=row.id, data={"shop": shop, "scopes": scopes})
         result = _view(row)
         if row.status == "pending":
-            result["authorization_url"] = f"https://{shop}/admin/oauth/authorize?" + urlencode({
-                "client_id": get_settings().shopify_client_id, "scope": ",".join(scopes), "state": state,
-                "redirect_uri": f"{get_settings().public_api_url.rstrip('/')}/v1/commerce/shopify/callback",
-            })
+            result["authorization_url"] = shopify.authorize_url(shop, scopes, state)
         return result
 
 
@@ -109,23 +106,8 @@ def session_status(principal: Principal, session_id: str) -> dict:
 
 def callback(principal: Principal, parameters: list[tuple[str, str]]) -> dict:
     _browser(principal)
-    params = dict(parameters)
-    if len(parameters) != len(params) or not all(params.get(key) for key in ("shop", "state", "code", "hmac", "timestamp")):
-        raise GluonsError("OAUTH_CALLBACK_INVALID", "Shopify authorization response is invalid.", status=400)
-    shop = shopify.shop_domain(params["shop"])
-    secret = get_settings().shopify_client_secret
-    if not secret:
-        raise GluonsError("CONFIGURATION_REQUIRED", "Configure the Shopify app credentials.", status=409)
-    message = "&".join(f"{key}={value}" for key, value in sorted(params.items()) if key != "hmac")
-    digest = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(digest, params["hmac"]):
-        raise GluonsError("OAUTH_SIGNATURE_INVALID", "Shopify authorization signature is invalid.", status=400)
-    try:
-        valid_time = abs(utcnow().timestamp() - int(params["timestamp"])) <= 300
-    except (ValueError, OverflowError):
-        valid_time = False
-    if not valid_time:
-        raise GluonsError("OAUTH_CALLBACK_EXPIRED", "Restart Shopify authorization.", status=400)
+    params = shopify.verify_query(parameters, required=("state", "code"))
+    shop = params["shop"]
     failure = None
     result = {}
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
@@ -138,29 +120,10 @@ def callback(principal: Principal, parameters: list[tuple[str, str]]) -> dict:
         try:
             credential = shopify.exchange(shop, params["code"])
             identity = shopify.identity(shop, credential["access_token"])
-            scopes = set(identity["scopes"])
-            if not set(row.requested_scopes) <= scopes:
+            if not set(row.requested_scopes) <= set(identity["scopes"]):
                 raise GluonsError("SCOPE_INSUFFICIENT", "Shopify did not grant the requested capabilities.", status=409)
-            connection = session.scalar(select(Connection).where(Connection.provider == "shopify", Connection.external_account_id == identity["id"], Connection.disconnected_at.is_(None)).with_for_update())
-            if connection is None:
-                connection = Connection(id=new_id("con"), tenant_id=principal.tenant_id, provider="shopify", external_account_id=identity["id"], account_display=identity["name"], created_by=principal.actor_id)
-                session.add(connection)
-            elif connection.credential_ref:
-                vault.destroy(session, principal.tenant_id, connection.credential_ref)
-            connection.credential_ref = vault.store(session, principal.tenant_id, "shopify", credential)
-            connection.account_display = f"{identity['name']} ({shop})"
-            connection.account_confirmed_at = None
-            connection.account_confirmed_by = None
-            connection.environment = "sandbox" if (identity.get("plan") or {}).get("partnerDevelopment") is True else "production"
-            connection.granted_scopes = sorted(scopes)
-            connection.status = "connected"
-            connection.last_checked_at = utcnow()
-            connection.token_expires_at = utcnow() + timedelta(seconds=int(credential["expires_in"]))
-            connection.metadata_json = {"shop": shop, "currency": identity.get("currencyCode"), "app_distribution": "approved_pilot_only"}
-            session.flush()
+            connection = store_connection(session, principal, shop=shop, identity=identity, credential=credential, distribution="approved_pilot_only")
             row.connection_id, row.status = connection.id, "authorized"
-            audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="shopify.authorized", actor=principal,
-                         resource_type="connection", resource_id=connection.id, data={"shop": shop, "scopes": sorted(scopes), "environment": connection.environment})
             result = _view(row)
         except (GluonsError, shopify.ProviderError) as exc:
             row.status = "failed"
@@ -169,6 +132,48 @@ def callback(principal: Principal, parameters: list[tuple[str, str]]) -> dict:
     if failure:
         raise failure
     return result
+
+
+def assert_shop_free(tenant_id: str, shop: str) -> None:
+    """One store feeds one business: two would make every webhook and order ambiguous."""
+    from gluons.db.session import system_tx
+    with system_tx() as session:
+        holders = session.scalars(select(Connection.tenant_id).where(
+            Connection.provider == "shopify", Connection.disconnected_at.is_(None),
+            Connection.metadata_json["shop"].as_string() == shop)).all()
+    if any(holder != tenant_id for holder in holders):
+        raise GluonsError("ACCOUNT_ALREADY_LINKED", "This store is connected to another Gluons business. Disconnect it there first.", status=409)
+
+
+def store_connection(session: Any, principal: Principal, *, shop: str, identity: dict, credential: dict, distribution: str) -> Connection:
+    """Shared by the pilot flow and the Shopify-initiated install. A reconnect replaces the
+    token and asks the owner to confirm the store again."""
+    assert_shop_free(principal.tenant_id, shop)
+    connection = session.scalar(select(Connection).where(Connection.provider == "shopify", Connection.external_account_id == identity["id"],
+                                                         Connection.disconnected_at.is_(None)).with_for_update())
+    if connection is None:
+        connection = Connection(id=new_id("con"), tenant_id=principal.tenant_id, provider="shopify", external_account_id=identity["id"],
+                                account_display=identity["name"], created_by=principal.actor_id)
+        session.add(connection)
+    elif connection.credential_ref:
+        vault.destroy(session, principal.tenant_id, connection.credential_ref)
+    connection.credential_ref = vault.store(session, principal.tenant_id, "shopify", credential)
+    connection.account_display = f"{identity['name']} ({shop})"
+    connection.account_confirmed_at = None
+    connection.account_confirmed_by = None
+    connection.environment = "sandbox" if (identity.get("plan") or {}).get("partnerDevelopment") is True else "production"
+    connection.granted_scopes = sorted(identity["scopes"])
+    connection.status = "connected"
+    connection.status_detail = "Confirm the displayed store before any automation uses it."
+    connection.last_checked_at = utcnow()
+    connection.token_expires_at = utcnow() + timedelta(seconds=int(credential["expires_in"]))
+    connection.metadata_json = {"shop": shop, "currency": identity.get("currencyCode"), "app_distribution": distribution,
+                                **shopify.token_metadata(credential)}
+    session.flush()
+    audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="shopify.authorized", actor=principal,
+                 resource_type="connection", resource_id=connection.id,
+                 data={"shop": shop, "scopes": sorted(identity["scopes"]), "environment": connection.environment, "distribution": distribution})
+    return connection
 
 
 def verify_connection(principal: Principal, connection_id: str) -> dict:
@@ -432,3 +437,165 @@ def webhook(connection_id: str, raw: bytes, signature: str, event_id: str, topic
         connection.last_event_at = utcnow()
         return {"status": "recorded" if inserted else "duplicate", "evidence": evidence,
                 "notice": "Evidence recorded; no supplier purchase, publication, refund or fulfillment was executed."}
+
+
+APP_TOPICS = ("app/uninstalled", "shop/redact", "customers/redact", "customers/data_request")
+ORDER_TOPICS = ("orders/paid", "orders/updated", "orders/create")
+
+
+def _shop_connections(session: Any, shop: str) -> list[Connection]:
+    return list(session.scalars(select(Connection).where(Connection.provider == "shopify",
+                                                         Connection.metadata_json["shop"].as_string() == shop)))
+
+
+def app_webhook(raw: bytes, signature: str, webhook_id: str, topic: str, shop_header: str) -> dict:
+    """The app-level endpoint for subscriptions declared in the app configuration.
+
+    Only the body is signed. Headers are routing hints, so compliance work is routed by the
+    signed body, and each topic must have exactly its documented shape. That stops a genuine
+    body from one topic being replayed under another, such as a data request as a shop erasure.
+    """
+    if len(raw) > 512 * 1024 or not re.fullmatch(r"[A-Za-z0-9-]{8,100}", webhook_id):
+        raise validation_failed("Webhook size or delivery identifier is invalid.")
+    secret = get_settings().shopify_client_secret
+    if not secret:
+        raise GluonsError("CONFIGURATION_REQUIRED", "Shopify webhook authentication is not configured.", status=503)
+    expected = base64.b64encode(hmac.new(secret.encode(), raw, hashlib.sha256).digest()).decode()
+    if not hmac.compare_digest(signature, expected):
+        raise GluonsError("WEBHOOK_SIGNATURE_INVALID", "Shopify webhook signature is invalid.", status=401)
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise validation_failed("Webhook is not JSON.") from exc
+    if not isinstance(payload, dict):
+        raise validation_failed("Webhook must contain an object.")
+    from gluons.db.session import system_tx
+    if topic in ORDER_TOPICS:
+        shop = shopify.shop_domain(shop_header)
+        with system_tx() as session:
+            active = [c.id for c in _shop_connections(session, shop) if c.disconnected_at is None and c.status == "connected"]
+        if len(active) != 1:
+            return {"status": "ignored_unknown_store"}
+        # Order evidence is only ever recorded after reading the order back from that store.
+        return webhook(active[0], raw, signature, webhook_id, topic, shop)
+    if topic not in APP_TOPICS:
+        return {"status": "ignored_topic"}
+    shop = _signed_shop(topic, payload)
+    with system_tx() as session:
+        inserted = session.execute(insert(WebhookInbox).values(
+            id=new_id("whi"), provider="shopify_app", event_id=webhook_id, event_type=topic, payload_hash=sha256_hex(raw),
+            payload={"shop": shop}, status="received").on_conflict_do_nothing(constraint="uq_webhook_provider_event").returning(WebhookInbox.id)).first()
+        if inserted is None:
+            return {"status": "duplicate"}
+        connections = _shop_connections(session, shop)
+        if topic == "app/uninstalled":
+            outcome = _uninstalled(session, connections)
+        elif topic == "shop/redact":
+            outcome = _redact_shop(session, connections)
+        elif topic == "customers/redact":
+            outcome = _redact_orders(session, connections, payload.get("orders_to_redact") or [])
+        else:
+            outcome = _data_request(session, connections, payload)
+        session.execute(WebhookInbox.__table__.update().where(WebhookInbox.id == inserted[0]).values(status="processed", processed_at=utcnow(),
+                                                                                                    payload={"shop": shop, "outcome": outcome}))
+    return {"status": "processed", "outcome": outcome}
+
+
+# Each compliance body must carry its own fields and none of another topic's. A store erasure
+# has exactly two fields, so no customer body can ever be replayed as one.
+_SHAPES = {
+    "shop/redact": ({"shop_id", "shop_domain"}, None),
+    "customers/redact": ({"shop_id", "shop_domain", "customer", "orders_to_redact"}, {"orders_requested", "data_request"}),
+    "customers/data_request": ({"shop_id", "shop_domain", "customer", "orders_requested", "data_request"}, {"orders_to_redact"}),
+}
+
+
+def _signed_shop(topic: str, payload: dict) -> str:
+    if topic == "app/uninstalled":
+        # The uninstall body is the shop resource itself.
+        domain = payload.get("myshopify_domain")
+        if not isinstance(payload.get("id"), int) or "shop_domain" in payload:
+            raise validation_failed("This is not an uninstall payload.")
+    else:
+        required, foreign = _SHAPES[topic]
+        keys = set(payload)
+        if not required <= keys or (keys != required if foreign is None else bool(keys & foreign)):
+            raise validation_failed("The webhook body does not match its topic.")
+        domain = payload.get("shop_domain")
+    return shopify.shop_domain(domain if isinstance(domain, str) else "")
+
+
+def _uninstalled(session: Any, connections: list[Connection]) -> dict:
+    """Shopify already revoked the token, so this only closes Gluons' side and tells the owner."""
+    from gluons.db.models import Automation, ProviderEventSubscription
+    closed = []
+    for connection in connections:
+        if connection.disconnected_at:
+            continue
+        if connection.credential_ref:
+            vault.destroy(session, connection.tenant_id, connection.credential_ref)
+            connection.credential_ref = None
+        connection.status, connection.disconnected_at, connection.disconnected_by = "disconnected", utcnow(), "shopify_uninstall"
+        connection.status_detail = "The Gluons app was removed in Shopify."
+        connection.version += 1
+        for automation in session.scalars(select(Automation).where(Automation.tenant_id == connection.tenant_id).with_for_update()):
+            bound = set((automation.config.get("connections") or {}).values()) | set(automation.source_connections or [])
+            if connection.id in bound and automation.status not in ("cancelled", "cancel_requested", "completed", "failed_terminal"):
+                automation.status, automation.version = "waiting_external", automation.version + 1
+        for subscription in session.scalars(select(ProviderEventSubscription).where(ProviderEventSubscription.connection_id == connection.id)):
+            subscription.status = "disabled"
+        audit.record(session, tenant_id=connection.tenant_id, category="permission", event_type="shopify.uninstalled", actor="shopify_webhook",
+                     resource_type="connection", resource_id=connection.id)
+        events.notify(session, connection.tenant_id, kind="connection_removed", severity="action", link="/connections",
+                      title="Your Shopify store was disconnected", body="The Gluons app was removed in Shopify. Automations that used the store are paused.",
+                      resource_type="connection", resource_id=connection.id)
+        closed.append(connection.id)
+    return {"connections_closed": len(closed)}
+
+
+def _redact_shop(session: Any, connections: list[Connection]) -> dict:
+    """Arrives 48 hours after uninstall. A store that was reinstalled since keeps its data."""
+    redacted = 0
+    for connection in connections:
+        if connection.disconnected_at is None:
+            continue
+        removed = session.execute(delete(WebhookInbox).where(WebhookInbox.connection_id == connection.id)).rowcount
+        connection.metadata_json = {"shop": connection.metadata_json.get("shop"), "redacted_at": utcnow().isoformat()}
+        audit.record(session, tenant_id=connection.tenant_id, category="data", event_type="shopify.shop_redacted", actor="shopify_webhook",
+                     resource_type="connection", resource_id=connection.id, data={"webhook_records_deleted": removed})
+        redacted += 1
+    return {"connections_redacted": redacted}
+
+
+def _order_gids(values: list) -> set[str]:
+    return {f"gid://shopify/Order/{value}" for value in values if isinstance(value, int) and value > 0}
+
+
+def _redact_orders(session: Any, connections: list[Connection], order_ids: list) -> dict:
+    """Gluons imports no Shopify customer profiles. It keeps order status evidence, which goes."""
+    gids, removed = _order_gids(order_ids), 0
+    for connection in connections:
+        for row in session.scalars(select(WebhookInbox).where(WebhookInbox.connection_id == connection.id, WebhookInbox.provider == "shopify")):
+            record = ((row.payload or {}).get("provider_evidence") or {}).get("provider_record") or {}
+            if record.get("id") in gids:
+                session.delete(row)
+                removed += 1
+        audit.record(session, tenant_id=connection.tenant_id, category="data", event_type="shopify.customer_redacted", actor="shopify_webhook",
+                     resource_type="connection", resource_id=connection.id, data={"order_records_deleted": removed})
+    return {"order_records_deleted": removed, "customer_profiles_held": 0}
+
+
+def _data_request(session: Any, connections: list[Connection], payload: dict) -> dict:
+    """The store owner must answer the customer. Gluons tells them what it holds for these orders."""
+    gids, held = _order_gids(payload.get("orders_requested") or []), 0
+    for connection in connections:
+        for row in session.scalars(select(WebhookInbox).where(WebhookInbox.connection_id == connection.id, WebhookInbox.provider == "shopify")):
+            record = ((row.payload or {}).get("provider_evidence") or {}).get("provider_record") or {}
+            held += record.get("id") in gids
+        audit.record(session, tenant_id=connection.tenant_id, category="data", event_type="shopify.customer_data_requested", actor="shopify_webhook",
+                     resource_type="connection", resource_id=connection.id, data={"order_records_held": held})
+        events.notify(session, connection.tenant_id, kind="shopify_data_request", severity="action", link="/data",
+                      title="A Shopify customer asked for their data",
+                      body=f"Gluons holds order status records for {held} of the requested orders and no customer profile. Export them from Your data to answer.",
+                      resource_type="connection", resource_id=connection.id)
+    return {"order_records_held": held, "customer_profiles_held": 0}

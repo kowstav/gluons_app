@@ -19,10 +19,10 @@ from gluons.db.session import tenant_tx
 
 PROVIDER_REQUIREMENTS = {
     "gmail": "Configure Google Web OAuth client and consent screen; authorize the registered callback.",
-    "whatsapp_business": "Approved Meta Business Platform onboarding and verified business account are required; integration pending.",
-    "shopify": "Create a merchant-owned Shopify store or use the official Partner transfer process; connector pending.",
-    "elevenlabs": "Configure an ElevenLabs agent and supported inbound telephony route; a real test call is required.",
-    "erpnext": "An authorized ERPNext service account and API endpoint are required; hosted connection setup pending.",
+    "whatsapp_business": "Open this setup in Gluons Web and choose Connect WhatsApp Business. Meta's own window handles the sign-in.",
+    "shopify": "Install Gluons from Shopify, then choose this business. Approved pilot shops can also connect here by domain.",
+    "elevenlabs": "Set up a phone route on the Business channels page. A real inbound test call is required.",
+    "erpnext": "An authorized ERPNext service account and API endpoint are required; hosted connection setup is not built yet.",
 }
 
 
