@@ -1,5 +1,7 @@
 # Implementation status — 2026-11-07
 
+> November 8: this historical checkpoint is superseded for GitHub/build evidence by the [current verification ledger](execution/06_VERIFICATION_AND_RELEASE.md). Private `kowstav/gluons_app` is published; functional CI checks passed and three images built, but dependency/image security scans failed. No live-provider or deployment proof was added.
+
 Gluons runs locally end to end and is not production ready. No real provider account has been connected, nothing is deployed, and the images and CI have never run. Everything below is proven against real PostgreSQL, the labelled ERP simulator or labelled provider doubles only.
 
 `docs/BLUEPRINT_TRACEABILITY.md` holds the row-by-row position, `docs/TEST_RESULTS.md` the runs, and `docs/ACCOUNT_CONNECTIONS.md` how owners sign in to each provider.

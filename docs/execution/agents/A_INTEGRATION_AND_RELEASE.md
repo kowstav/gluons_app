@@ -25,4 +25,6 @@ Own shared files listed in the working agreement: migrations/models/session poli
 
 ## First steps and boundaries
 
+Publication is complete. Begin with the first CI failures documented in [verification](../06_VERIFICATION_AND_RELEASE.md): pytest advisory/constraint compatibility, patched base images/OS packages, web-image Node tooling/dependencies, and independently executed npm audit. All three images build, but scans fail and SBOM steps do not complete. Preserve thresholds, make tested fixes and rerun full CI before closing EX-00/G0. Then prove container runtime.
+
 Refresh the audit ledger and GitHub state. Resolve actual failures in small commits with evidence. Do not disable secret/dependency scans or loosen tenancy to get green CI. Do not provision all environments before one staging deployment is proved. Do not merge the older `kowstav/gluons` runtime into this repository. Keep deployment manual and separately authorized. Handoff exact image/commit/migration/config versions and remaining gates.

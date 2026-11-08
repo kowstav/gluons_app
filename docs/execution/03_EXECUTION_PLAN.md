@@ -42,6 +42,8 @@ Baseline host authorization can use the existing email/MFA flow; Google sign-in 
 
 ## Work packages
 
+November 8 update: EX-00 repository publication is complete, but first CI dependency auditing and all three image scans failed. Functional/migration/web/secret/Terraform jobs passed and images built. Resolve the [recorded security findings](06_VERIFICATION_AND_RELEASE.md) before closing G0; re-estimate EX-00 after triage. Container runtime and real providers remain unverified.
+
 Effort ranges below are planning estimates in focused engineer-days, not completion promises. They assume a developer familiar with the code and exclude provider review, owner decisions and cloud provisioning wait. Re-estimate after G0 and the first provider run. A solo founder should execute the same dependencies sequentially.
 
 | ID | Deliverable | Dependencies | Owner | Estimate | Acceptance |

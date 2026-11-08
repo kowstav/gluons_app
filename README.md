@@ -25,7 +25,9 @@ The runner starts PostgreSQL, migrations, all 31 skill contracts, the worker, an
 the explicitly labelled ERP simulator. Ctrl+C stops application services.
 
 Alternatively, `docker compose up --build` starts the local containers. Compose
-configuration is validated; container builds and runtime remain separately unverified.
+configuration is validated. All three images built in first GitHub CI, but security
+scans failed; container runtime remains unverified. See the
+[verification ledger](docs/execution/06_VERIFICATION_AND_RELEASE.md).
 
 ## Verify
 

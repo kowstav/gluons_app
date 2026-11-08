@@ -13,11 +13,26 @@ Baseline implementation: `4fa7247bdc06b2ef7051f117c1c4c37d32d48b17`. Only docume
 | Backend execution with permitted local process/loopback access | Passed, exit 0: all 694 tests; real local PostgreSQL and simulator/provider doubles, not real providers |
 | Web typecheck | `npm run typecheck --prefix apps/web` passed, exit 0 |
 | Prior full verification | November 7 ledger reports 694 backend and 2 Playwright passes, build/typecheck, lint and Terraform validation |
-| Fresh Playwright/build/images/Terraform | Not claimed by this audit unless later result is added |
+| Fresh GitHub checks | Backend, migrations, web typecheck/build/Playwright, secret scan and all three Terraform validations passed. Security failures below. |
 | Real provider/cloud/assistant-host test | Not performed in this planning task |
-| GitHub repository | Private `kowstav/gluons_app` created; publication/CI result to be recorded after push |
+| GitHub repository | Private `kowstav/gluons_app` created; main and execution package published at `0eb4d9b65e5c6668887894e1214768c6685cbc47`; origin configured |
 | Documentation validation | 16 execution Markdown documents; relative links valid; all 31 catalog IDs mapped in the expansion plan; `git diff --check` passed |
 | Pre-publication secret scan | Gitleaks 8.30.1, official checksum verified; initial history scan found two synthetic test fixtures. Exact finding fingerprints documented in `.gitleaksignore`; no broad test-directory exemption. Reviewed rerun: 27 commits scanned, zero remaining findings. |
+
+## First GitHub CI result: EX-00 remains open
+
+[CI run 42462733424](https://github.com/kowstav/gluons_app/actions/runs/42462733424), November 8, commit `0eb4d9b65e5c6668887894e1214768c6685cbc47`, completed **failure** in 3m45s. Python lint/tests, migrations, web typecheck/build/Playwright, secret scanning and Terraform validation for dev/staging/prod passed. All three Docker images built. Container runtime, real ERPNext and cloud deployment remain unverified.
+
+| Failed job | Scanner evidence |
+|---|---|
+| Dependency audit | pip-audit reported `pytest 8.4.2`, `PYSEC-2026-1845`, suggested fix `9.0.3`. Summary says two findings but the table repeats the same package/advisory; do not count two distinct advisories. Subsequent npm audit was skipped. |
+| API image | Debian 12.11: 46 findings, 39 high and 7 critical; includes apt, GnuTLS, OpenSSL and Perl packages. |
+| Web image | OS: 24 findings, 22 high and 2 critical. Node packages: 30 findings, 29 high and 1 critical; includes brace-expansion, glob, minimatch and tar. |
+| Sandbox ERP image | Debian target: 46 findings, 39 high and 7 critical. This is the simulator image, not ERPNext. |
+
+These are scanner-reported package findings, not independent exploitability conclusions or unique CVE counts. Use the complete linked run logs for exact package paths and fixed versions; distinguish bundled Node tooling from application dependencies. Downstream SBOM steps did not complete after Trivy failures.
+
+Agent A must first inspect the pytest advisory and plugin compatibility (current dev constraint is `<9`), make compatible range/lock changes, refresh pinned base-image digests and affected runtime packages, and inspect/remove unnecessary build tooling where supported. Run pip and npm audits independently, rebuild/scan all three images, retain SBOMs and exact digests, and rerun functional/migration checks plus container startup. Do not weaken scan thresholds or use broad exemptions. G0 closes only after passing CI. The documentation-only evidence follow-up uses `[skip ci]` to avoid rerunning unchanged inputs; the failed baseline remains explicitly open.
 
 ## Required acceptance scenarios
 

@@ -1,5 +1,7 @@
 # Deployment status — 2026-11-07
 
+> November 8: the table below is historical. Private `kowstav/gluons_app` is published; first CI built three images and passed functional/Terraform checks, but dependency/image security scans failed. Container runtime and deployment remain unverified. See the [current verification ledger](execution/06_VERIFICATION_AND_RELEASE.md).
+
 Nothing is deployed. No cloud resources exist, no paid provider action was taken, and no real credentials were used.
 
 | Check | State |

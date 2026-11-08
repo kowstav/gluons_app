@@ -18,6 +18,8 @@ Do not report a single percentage complete. The existing matrix contains **83 re
 
 ## Evidence classification
 
+Post-publication update: first GitHub CI passed backend, migration, web, secret and Terraform checks and built all three images. Dependency auditing and every image security scan failed. This supersedes references below to pending first CI/build proof; runtime and real providers remain unverified. See [verification](06_VERIFICATION_AND_RELEASE.md) for exact results and immediate remediation.
+
 | Label | Meaning |
 |---|---|
 | Source inspected | Relevant implementation exists and was reviewed in this audit; this is not comprehensive certification |
