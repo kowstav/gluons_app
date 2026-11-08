@@ -56,3 +56,6 @@ Thumbs.db
 
 # Agent worktrees are local checkouts, never repository content
 .claude/worktrees/
+
+# Private founder context: local reference, never part of the source repository.
+GLUONS_COMPLETE_FOUNDER_AND_PRODUCT_MASTER_CONTEXT_*.md

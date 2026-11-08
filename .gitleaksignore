@@ -1,0 +1,5 @@
+# Reviewed 2026-11-08: synthetic fixtures only; exact historical finding fingerprints.
+# Deliberately malformed private-key text assembled from the A40 test constant.
+64df99d82b093cca24ce8d3819b2926019ff8198:apps/api/tests/test_observability_redaction.py:private-key:60
+# Base64 of a literal signing-key test phrase; used only to test hosted config rejection.
+b36e670e15b79aa485210692266c700538a02586:apps/api/tests/test_core_identity.py:generic-api-key:177

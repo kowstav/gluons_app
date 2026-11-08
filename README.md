@@ -4,6 +4,11 @@ Owner-controlled business automation with a real PostgreSQL control plane, FastA
 durable workers, authenticated MCP and a responsive Next.js owner application.
 The authoritative product specification is in [gluons_blueprint](gluons_blueprint/README.md).
 
+The [November 8 execution package](docs/execution/README.md) reconciles current
+implementation progress with the updated product plan and provides dependency-ordered
+work packages, verification gates and briefs for future agents. Start there before
+continuing implementation; the private founder master context is not published.
+
 ## Run locally (Windows PowerShell)
 
 ```powershell
