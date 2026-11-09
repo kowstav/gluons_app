@@ -5,7 +5,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'codex/**']
   workflow_dispatch:
 
 permissions:
@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PYTHON_VERSION: '3.13.3'
-  NODE_VERSION: '24.11.1'
+  PYTHON_VERSION: '3.13.18'
+  NODE_VERSION: '24.22.2'
   TERRAFORM_VERSION: '1.17.1'
   PIP_AUDIT_VERSION: '2.10.1'
 
@@ -151,6 +151,7 @@ jobs:
           python -m pip install "pip-audit==${PIP_AUDIT_VERSION}"
           pip-audit --no-deps --disable-pip -r requirements.lock -r infra/docker/requirements-gcp.lock
       - name: npm audit
+        if: ${{ !cancelled() }}
         working-directory: apps/web
         run: npm audit --audit-level=high
 
@@ -169,6 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
         with:
           context: .
           file: ${{ matrix.image.dockerfile }}
@@ -183,6 +185,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
       - name: SBOM
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: gluons-${{ matrix.image.name }}:ci
