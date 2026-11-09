@@ -24,7 +24,7 @@ from gluons.db.session import tenant_tx
 # Dataset -> (model, ordered timestamp, explicitly exported columns). No global
 # identity table, credential/session table, or arbitrary metadata is reachable.
 DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
-    "organization": (m.Organization, "created_at", ("id", "name", "legal_name", "industry", "country", "timezone", "monthly_budget_usd", "created_at", "version")),
+    "organization": (m.Organization, "created_at", ("id", "name", "legal_name", "industry", "country", "timezone", "business_passport", "passport_version", "monthly_budget_usd", "created_at", "version")),
     "memberships": (m.Membership, "created_at", ("id", "user_id", "role", "approval_tier_limit", "created_at", "removed_at")),
     "connections": (m.Connection, "created_at", ("id", "provider", "environment", "account_display", "status", "account_confirmed_at", "last_checked_at", "created_at", "disconnected_at", "version")),
     "assistants": (m.AgentBinding, "created_at", ("id", "user_id", "display_name", "host_kind", "status", "created_at", "last_used_at", "revoked_at")),

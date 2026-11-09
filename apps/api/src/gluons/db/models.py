@@ -315,6 +315,8 @@ class Organization(Base):
     country: Mapped[str | None] = mapped_column(String(2))
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
     business_facts: Mapped[dict] = _json()
+    business_passport: Mapped[dict] = _json()
+    passport_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     emergency_stop_at: Mapped[datetime | None] = _ts()
     emergency_stop_by: Mapped[str | None] = mapped_column(String(40))
     paused_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
