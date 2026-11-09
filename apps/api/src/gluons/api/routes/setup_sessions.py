@@ -36,7 +36,8 @@ def start(body: StartSetup, principal: PrincipalDep, key: IdempotencyKey) -> dic
 
 
 @router.get("/{setup_id}")
-def get(setup_id: str, principal: PrincipalDep) -> dict:
+def get(setup_id: str, principal: PrincipalDep, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
     return setup_sessions.get(principal, setup_id)
 
 
