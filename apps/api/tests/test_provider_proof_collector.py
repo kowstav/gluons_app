@@ -106,3 +106,21 @@ def test_no_session_or_other_action_can_issue_a_request():
     with pytest.raises(ValueError):
         proof.collect("https://api.example.com", "session", "run_123", provider="erpnext", action="erp.order.create",
                       environment="production", transport=transport)
+
+
+def test_explicit_readback_is_second_get_and_does_not_expose_receipt_id():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path == "/v1/runs/run_123":
+            return httpx.Response(200, json={"id": "run_123", "receipts": [receipt(id="private-receipt")]})
+        return httpx.Response(200, json={"provider": "gmail", "environment": "sandbox", "found": True,
+                                        "matches": True, "scope": "sent_mail_readback_not_delivery", "receipt_modified": False})
+
+    result = proof.collect("https://api.example.com", "secret-session", "run_123", provider="gmail", action="email.send",
+                           environment="sandbox", independent_readback=True, transport=httpx.MockTransport(handler))
+    assert [r.method for r in requests] == ["GET", "GET"]
+    assert requests[1].url.path == "/v1/proofs/gmail/receipts/private-receipt/readback"
+    assert result["independent_provider_evidence"] == "matched" and result["review_status"] == "pending"
+    assert "private-receipt" not in json.dumps(result) and "secret-session" not in json.dumps(result)
