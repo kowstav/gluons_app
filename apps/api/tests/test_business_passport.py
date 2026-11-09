@@ -27,6 +27,8 @@ def test_profile_is_versioned_confirmed_and_exported(world, owner):
     assert result["fields"]["brand_name"]["value"] == "Example Shop"
     assert result["fields"]["brand_name"]["confirmed_by"] == owner.user_id
     assert result["fields"]["brand_name"]["source"] == "owner"
+    assert result["fields"]["brand_name"]["schema_version"] == result["schema_version"] == 1
+    assert result["fields"]["brand_name"]["sensitivity"] == "business_profile"
     with pytest.raises(GluonsError) as exc:
         passport.update(owner, 1, {"brand_name": "Stale"})
     assert exc.value.status == 409
@@ -92,6 +94,7 @@ def test_authenticated_api_rejects_extra_fields_and_stale_versions(world):
 @pytest.mark.parametrize("fields", [
     {"access_token": "secret"}, {"currency": "usd"}, {"selling_regions": ["IN", "IN"]},
     {"support_email": "not-an-email"}, {"brand_name": ""},
+    {"support_hours": "password=example"}, {"operational_address": "4111111111111111"},
 ])
 def test_unknown_or_invalid_values_are_rejected(owner, fields):
     with pytest.raises(GluonsError) as exc:

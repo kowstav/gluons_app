@@ -1,9 +1,10 @@
 """Confirmed, non-secret business facts, separate from provider authority."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
 
 from gluons import audit
 from gluons.authz import Principal, Role
@@ -31,6 +32,20 @@ class PassportFields(BaseModel):
             raise ValueError("Use unique uppercase two-letter region codes.")
         return values
 
+    @model_validator(mode="after")
+    def reject_credential_markers(self) -> PassportFields:
+        # Free-text fields are for ordinary business facts, not credential storage.
+        marker = re.compile(r"(?i)(?:bearer\s+\S+|(?:password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{16,}|(?<!\d)\d{12,19}(?!\d))")
+        for value in self.model_dump(exclude_unset=True).values():
+            values = value if isinstance(value, list) else [value]
+            if any(isinstance(item, str) and marker.search(item) for item in values):
+                raise ValueError("Credentials and sensitive identifiers do not belong in the Passport.")
+        return self
+
+
+def field_metadata(name: str) -> dict[str, Any]:
+    return {"schema_version": 1, "sensitivity": "business_contact" if name in {"support_email", "operational_address"} else "business_profile"}
+
 
 def _owner(principal: Principal) -> None:
     principal.require("org:manage")
@@ -39,7 +54,9 @@ def _owner(principal: Principal) -> None:
 
 
 def _view(org: Organization) -> dict[str, Any]:
-    return {"organization_id": org.id, "version": org.passport_version, "fields": org.business_passport,
+    return {"organization_id": org.id, "schema_version": 1, "version": org.passport_version, "fields": org.business_passport,
+            "organization": {"name": org.name, "country": org.country, "timezone": org.timezone,
+                             "source": "organization_record", "passport_confirmation": "not_confirmed"},
             "notice": "Profile facts do not authorize sharing or provider actions."}
 
 
@@ -71,7 +88,7 @@ def update(principal: Principal, expected_version: int, changes: dict[str, Any])
                 fields.pop(name, None)
             else:
                 fields[name] = {"value": value, "source": "owner", "confirmed_at": now,
-                                "confirmed_by": principal.user_id}
+                                "confirmed_by": principal.user_id, **field_metadata(name)}
         if changes:
             org.business_passport = fields
             org.passport_version += 1

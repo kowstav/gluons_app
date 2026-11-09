@@ -54,7 +54,7 @@ DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
 MAX_PAGE_BYTES = 4 * 1024 * 1024
 MAX_RECORD_BYTES = 512 * 1024
 LIMITATIONS = [
-    "Structured allowlisted records only; credentials, sessions, OAuth state, signatures, internal storage locators and arbitrary metadata are excluded.",
+    "Structured allowlisted records only; credentials, authentication sessions, OAuth state, signatures, internal storage locators and arbitrary metadata are excluded. Setup sessions are exported as sanitized summaries.",
     "Raw message/document/transcript bodies, order-line JSON, runtime inputs/outputs and provider responses are excluded; retrieve separately through authorized retention-aware workflows.",
     "The cursor fixes a creation-time cutoff where recorded, not a cross-request database snapshot; records may change during pagination. Catalog rows have no creation timestamp and use stable ID ordering.",
     "No data or account is deleted by an export.",
@@ -152,7 +152,7 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
                 record["passport_consents"] = [{k: v for k, v in consent.items() if k != "preview_hash"}
                                                for consent in row["passport_consents"]]
             if dataset == "setup_sessions":
-                keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "created_by", "connection_session_id")
+                keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "created_by", "connection_session_id")
                 record["setup_sessions"] = [{key: item.get(key) for key in keys} for item in row["setup_sessions"].values()]
             record_bytes = len(canonical_json(record).encode())
             if record_bytes > MAX_RECORD_BYTES:

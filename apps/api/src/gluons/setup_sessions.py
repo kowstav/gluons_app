@@ -41,15 +41,24 @@ def _org(session, principal: Principal, *, lock: bool = False) -> Organization:
     return org
 
 
-def _item(org: Organization, setup_id: str, principal: Principal) -> dict[str, Any]:
+def _expiry(item: dict[str, Any]) -> datetime:
+    # Earlier development records did not persist a deadline.
+    if item.get("expires_at"):
+        return datetime.fromisoformat(item["expires_at"])
+    return datetime.fromisoformat(item["created_at"]) + timedelta(days=30)
+
+
+def _item(org: Organization, setup_id: str, principal: Principal, *, active: bool = False) -> dict[str, Any]:
     item = org.setup_sessions.get(setup_id)
     if item is None or item["created_by"] != principal.user_id:
         raise not_found("Setup session")
+    if active and _expiry(item) <= utcnow():
+        raise conflict("This setup expired. Start a new setup for the existing plan.")
     return deepcopy(item)
 
 
 def _view(item: dict[str, Any], connection: ConnectionSession | None = None, account: Connection | None = None) -> dict[str, Any]:
-    view = {key: item.get(key) for key in ("id", "intent", "launch_plan_id", "status", "version", "created_at", "connection_session_id")}
+    view = {key: item.get(key) for key in ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "connection_session_id")}
     if connection is not None:
         status = "expired" if connection.expires_at <= utcnow() and connection.consumed_at is None else connection.status
         view["connection"] = {"id": connection.id, "provider": connection.provider, "status": status,
@@ -75,6 +84,10 @@ def _view(item: dict[str, Any], connection: ConnectionSession | None = None, acc
     else:
         view["connection"] = None
         actions = [{"code": "connect_provider", "label": "Choose a provider to connect"}]
+    view["expires_at"] = _expiry(item).isoformat()
+    if _expiry(item) <= utcnow():
+        view["status"] = "expired"
+        actions = [{"code": "restart_setup", "label": "Start a new setup for this plan"}]
     view["next_actions"] = actions
     view["notice"] = "Setup state does not authorize provider access, sharing, or business actions."
     return view
@@ -113,7 +126,7 @@ def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idem
         if launch_plan_id and session.get(LaunchPlan, launch_plan_id) is None:
             raise not_found("Business launch plan")
         item = {"id": new_id("set"), "intent": intent, "launch_plan_id": launch_plan_id, "status": "in_progress",
-                "version": 1, "created_at": utcnow().isoformat(), "created_by": principal.user_id,
+                "version": 1, "created_at": utcnow().isoformat(), "expires_at": (utcnow() + timedelta(days=30)).isoformat(), "created_by": principal.user_id,
                 "connection_session_id": None, "idempotency_hash": key_hash, "request_hash": request_hash,
                 "link_hash": None, "link_expires_at": None}
         records[item["id"]] = item
@@ -130,11 +143,41 @@ def get(principal: Principal, setup_id: str) -> dict[str, Any]:
         return _render(session, item, principal)
 
 
-def attach_connection(principal: Principal, setup_id: str, connection_session_id: str, expected_version: int) -> dict[str, Any]:
+def list_sessions(principal: Principal) -> list[dict[str, Any]]:
+    _owner(principal)
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = _org(session, principal)
+        records = [deepcopy(item) for item in org.setup_sessions.values() if item.get("created_by") == principal.user_id]
+        return [_render(session, item, principal) for item in sorted(records, key=lambda row: row["created_at"], reverse=True)]
+
+
+def remove_expired(principal: Principal, setup_id: str, expected_version: int) -> dict[str, Any]:
+    """Remove expired setup progress without disconnecting a provider account."""
     _owner(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         org = _org(session, principal, lock=True)
         item = _item(org, setup_id, principal)
+        if item["version"] != expected_version:
+            raise conflict_version(item["version"])
+        if _expiry(item) > utcnow():
+            raise conflict("Only expired setup progress can be removed.")
+        connection = _connection(session, item, principal)
+        if (connection is not None and connection.consumed_at is None and connection.expires_at > utcnow()
+                and connection.status not in {"cancelled", "failed", "authorized"}):
+            raise conflict("Finish or cancel the active connection handoff before removing setup progress.")
+        records = deepcopy(org.setup_sessions)
+        del records[setup_id]
+        org.setup_sessions = records
+        audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.expired_removed", actor=principal,
+                     resource_type="setup_session", resource_id=setup_id, data={})
+        return {"id": setup_id, "removed": True, "notice": "Provider accounts and completed actions are unchanged."}
+
+
+def attach_connection(principal: Principal, setup_id: str, connection_session_id: str, expected_version: int) -> dict[str, Any]:
+    _owner(principal)
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = _org(session, principal, lock=True)
+        item = _item(org, setup_id, principal, active=True)
         if item["version"] != expected_version:
             raise conflict_version(item["version"])
         connection = session.get(ConnectionSession, connection_session_id)
@@ -163,7 +206,7 @@ def request_connection(principal: Principal, setup_id: str, *, provider: str, ca
     key_hash = fingerprint({"owner": principal.user_id, "key": idempotency_key})
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         org = _org(session, principal, lock=True)
-        item = _item(org, setup_id, principal)
+        item = _item(org, setup_id, principal, active=True)
         existing = _connection(session, item, principal)
         if item.get("connection_key_hash") == key_hash:
             if item.get("connection_request_hash") != request_hash:
@@ -195,7 +238,7 @@ def issue_resume_token(principal: Principal, setup_id: str, expected_version: in
     _owner(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         org = _org(session, principal, lock=True)
-        item = _item(org, setup_id, principal)
+        item = _item(org, setup_id, principal, active=True)
         if item["version"] != expected_version:
             raise conflict_version(item["version"])
         secret = new_secret_token()
@@ -213,7 +256,7 @@ def redeem(principal: Principal, setup_id: str, secret: str) -> dict[str, Any]:
     _owner(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         org = _org(session, principal, lock=True)
-        item = _item(org, setup_id, principal)
+        item = _item(org, setup_id, principal, active=True)
         expiry = item.get("link_expires_at")
         if (not item.get("link_hash") or not expiry or datetime.fromisoformat(expiry) <= utcnow()
                 or not constant_time_equals(item["link_hash"], token_hash(secret))):

@@ -104,7 +104,8 @@ def confirm_import(principal: Principal, token: str) -> dict[str, Any]:
             raise conflict("The connected store changed. Review a fresh import preview.")
         fields = dict(org.business_passport)
         fields["currency"] = {"value": currency, "source": "shopify", "source_ref": row.id,
-                              "confirmed_at": utcnow().isoformat(), "confirmed_by": principal.user_id}
+                              "confirmed_at": utcnow().isoformat(), "confirmed_by": principal.user_id,
+                              **passport.field_metadata("currency")}
         org.business_passport = fields
         org.passport_version += 1
         audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="passport.import_confirmed",

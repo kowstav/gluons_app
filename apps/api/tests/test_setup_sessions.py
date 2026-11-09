@@ -29,6 +29,7 @@ def create(owner, key="setup-key-123"):
 def test_idempotent_create_and_versioned_existing_connection(owner):
     initial = create(owner)
     assert create(owner) == initial
+    assert setup_sessions.list_sessions(replace(owner, session_id="after-sign-in"))[0]["id"] == initial["id"]
     with pytest.raises(GluonsError):
         setup_sessions.start(owner, intent="business_launch", launch_plan_id="different", idempotency_key="setup-key-123")
     connection = service.begin_session(owner, "gmail", capabilities=["read_order_messages"])
@@ -154,3 +155,34 @@ def test_expired_link_can_be_replaced_and_purge_erases_setup(world, owner):
     deletion.purge(world.tenant_id)
     with tenant_tx(world.tenant_id) as session:
         assert session.get(Organization, world.tenant_id).setup_sessions == {}
+
+
+def test_expired_setup_preserves_record_but_cannot_mint_authority(world, owner):
+    setup = create(owner)
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id)
+        records = deepcopy(org.setup_sessions)
+        records[setup["id"]]["expires_at"] = (utcnow() - timedelta(seconds=1)).isoformat()
+        org.setup_sessions = records
+    expired = setup_sessions.get(owner, setup["id"])
+    assert expired["status"] == "expired" and expired["next_actions"][0]["code"] == "restart_setup"
+    with pytest.raises(GluonsError):
+        setup_sessions.issue_resume_token(owner, setup["id"], 1)
+    replacement = create(owner, "new-setup-key-123")
+    assert replacement["id"] != setup["id"]
+    assert setup_sessions.remove_expired(owner, setup["id"], 1)["removed"] is True
+    with pytest.raises(GluonsError):
+        setup_sessions.get(owner, setup["id"])
+
+
+def test_expired_setup_with_active_handoff_cannot_be_removed(world, owner):
+    setup = create(owner)
+    requested = setup_sessions.request_connection(owner, setup["id"], provider="gmail", capabilities=["read_messages"],
+                                                   expected_version=1, idempotency_key="active-handoff-key")
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id)
+        records = deepcopy(org.setup_sessions)
+        records[setup["id"]]["expires_at"] = (utcnow() - timedelta(seconds=1)).isoformat()
+        org.setup_sessions = records
+    with pytest.raises(GluonsError):
+        setup_sessions.remove_expired(owner, setup["id"], requested["version"])

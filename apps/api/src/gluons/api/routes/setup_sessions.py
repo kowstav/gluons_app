@@ -40,10 +40,21 @@ def start(body: StartSetup, principal: PrincipalDep, key: IdempotencyKey) -> dic
     return setup_sessions.start(principal, intent=body.intent, launch_plan_id=body.launch_plan_id, idempotency_key=key)
 
 
+@router.get("")
+def list_sessions(principal: PrincipalDep, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return {"sessions": setup_sessions.list_sessions(principal)}
+
+
 @router.get("/{setup_id}")
 def get(setup_id: str, principal: PrincipalDep, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     return setup_sessions.get(principal, setup_id)
+
+
+@router.post("/{setup_id}/remove-expired")
+def remove_expired(setup_id: str, body: Version, principal: PrincipalDep) -> dict:
+    return setup_sessions.remove_expired(principal, setup_id, body.expected_version)
 
 
 @router.post("/{setup_id}/connection")

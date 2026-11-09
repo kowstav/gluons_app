@@ -97,6 +97,16 @@ def test_preview_rejects_tamper_cross_org_and_unconfirmed_fields(world, owner):
         assert session.get(Organization, world.tenant_id).passport_consents == []
 
 
+def test_expired_preview_cannot_create_consent(owner, monkeypatch):
+    passport.update(owner, 1, {"currency": "INR"})
+    token = passport_previews.preview_share(owner, "shopify", ["currency"], "account_setup")["preview_token"]
+    future = utcnow() + timedelta(minutes=16)
+    monkeypatch.setattr(passport_previews, "utcnow", lambda: future)
+    with pytest.raises(GluonsError):
+        passport_previews.confirm_share(owner, token)
+    assert passport_previews.list_consents(owner) == []
+
+
 def test_authenticated_http_preview_confirm_and_revoke(world, owner):
     passport.update(owner, 1, {"currency": "INR"})
     with TestClient(create_app()) as client:
