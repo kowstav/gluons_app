@@ -149,7 +149,9 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
         for row in rows[:limit]:
             record = {column: _value(row[column]) for column in columns}
             if dataset == "organization":
-                record["passport_consents"] = [{k: v for k, v in consent.items() if k != "preview_hash"}
+                record["business_passport"] = {name: {k: v for k, v in field.items() if k != "value_hash"}
+                                               for name, field in row["business_passport"].items()}
+                record["passport_consents"] = [{k: v for k, v in consent.items() if k not in {"preview_hash", "values_hash"}}
                                                for consent in row["passport_consents"]]
             if dataset == "setup_sessions":
                 keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "created_by", "connection_session_id")

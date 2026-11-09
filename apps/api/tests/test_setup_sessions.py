@@ -85,7 +85,8 @@ def test_next_action_follows_account_confirmation_and_health(world, owner):
         ref = vault.store(session, world.tenant_id, "gmail", {"access_token": "synthetic"})
         account = Connection(id=new_id("con"), tenant_id=world.tenant_id, provider="gmail", environment="production",
                              external_account_id="synthetic-account", account_display="test@example.com", created_by=world.user_id,
-                             credential_ref=ref, status="connected", granted_scopes=handoff.requested_scopes, last_checked_at=utcnow())
+                             credential_ref=ref, status="connected", granted_scopes=handoff.requested_scopes, last_checked_at=utcnow(),
+                             metadata_json={"account_email": "test@example.com"})
         session.add(account)
         session.flush()
         handoff.connection_id, handoff.status = account.id, "authorized"
@@ -94,6 +95,9 @@ def test_next_action_follows_account_confirmation_and_health(world, owner):
     with tenant_tx(world.tenant_id) as session:
         session.get(Connection, account_id).account_confirmed_at = utcnow()
     assert setup_sessions.get(owner, setup["id"])["next_actions"] == []
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, account_id).metadata_json = {"account_email": "different@example.com"}
+    assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "reconnect_account"
     with tenant_tx(world.tenant_id) as session:
         session.get(Connection, account_id).status = "disconnected"
     assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "reconnect_account"

@@ -116,7 +116,7 @@ def confirm_import(principal: Principal, token: str) -> dict[str, Any]:
 
 def preview_share(principal: Principal, provider: str, field_names: list[str], purpose: str) -> dict[str, Any]:
     passport._owner(principal)
-    allowed = set(passport.PassportFields.model_fields)
+    allowed = set(passport.PassportFields.model_fields) | set(passport.ORGANIZATION_FIELDS)
     if (provider not in {"shopify", "gmail"} or purpose != "account_setup" or not field_names
             or len(field_names) > len(allowed) or len(set(field_names)) != len(field_names) or not set(field_names) <= allowed):
         raise validation_failed("Choose a supported provider, purpose and confirmed Passport fields.")
@@ -124,12 +124,16 @@ def preview_share(principal: Principal, provider: str, field_names: list[str], p
         org = session.get(Organization, principal.tenant_id)
         if org is None:
             raise not_found("Organization")
-        if not set(field_names) <= set(org.business_passport):
+        resolved = passport.resolved_fields(org)
+        if not set(field_names) <= set(resolved) or any("value" not in resolved[name] for name in field_names):
             raise validation_failed("Confirm each selected field before sharing.")
         names = sorted(field_names)
+        values = {name: resolved[name]["value"] for name in names}
+        organization_version = org.version if any(resolved[name].get("source") == "organization" for name in names) else None
         token = _seal(principal, "share", {"provider": provider, "purpose": purpose, "fields": names,
-                                            "version": org.passport_version})
-        return {"provider": provider, "purpose": purpose, "fields": {name: org.business_passport[name]["value"] for name in names},
+                                            "version": org.passport_version, "organization_version": organization_version,
+                                            "values_hash": fingerprint(values)})
+        return {"provider": provider, "purpose": purpose, "fields": values,
                 "profile_version": org.passport_version, "preview_token": token,
                 "notice": "Confirming records consent only; no data is sent and no provider action is authorized."}
 
@@ -143,22 +147,29 @@ def confirm_share(principal: Principal, token: str) -> dict[str, Any]:
             raise not_found("Organization")
         if org.passport_version != preview["version"]:
             raise conflict("The Passport changed. Review a fresh sharing preview.")
+        resolved = passport.resolved_fields(org)
+        names = preview["fields"]
+        if (preview.get("organization_version") is not None and preview["organization_version"] != org.version
+                or not set(names) <= set(resolved) or any("value" not in resolved[name] for name in names)
+                or fingerprint({name: resolved[name]["value"] for name in names}) != preview.get("values_hash")):
+            raise conflict("The confirmed business fields changed. Review a fresh sharing preview.")
         token_digest = fingerprint(token)
         for consent in org.passport_consents:
             if constant_time_equals(consent["preview_hash"], token_digest):
-                return {key: value for key, value in consent.items() if key != "preview_hash"}
+                return {key: value for key, value in consent.items() if key not in {"preview_hash", "values_hash"}}
         if len(org.passport_consents) >= MAX_CONSENTS:
             raise conflict("This business has reached its consent history limit.")
         now = utcnow()
         consent = {"id": new_id("psc"), "provider": preview["provider"], "purpose": preview["purpose"],
                    "fields": preview["fields"], "profile_version": org.passport_version,
+                   "organization_version": preview["organization_version"], "values_hash": preview["values_hash"],
                    "confirmed_by": principal.user_id, "confirmed_at": now.isoformat(),
                    "expires_at": (now + CONSENT_TTL).isoformat(), "preview_hash": token_digest}
         org.passport_consents = [*org.passport_consents, consent]
         audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="passport.share_consent",
                      actor=principal, resource_type="organization", resource_id=principal.tenant_id,
                      data={"provider": consent["provider"], "fields": consent["fields"], "profile_version": org.passport_version})
-        return {key: value for key, value in consent.items() if key != "preview_hash"}
+        return {key: value for key, value in consent.items() if key not in {"preview_hash", "values_hash"}}
 
 
 def list_consents(principal: Principal) -> list[dict[str, Any]]:
@@ -168,10 +179,15 @@ def list_consents(principal: Principal) -> list[dict[str, Any]]:
         if org is None:
             raise not_found("Organization")
         result = []
+        resolved = passport.resolved_fields(org)
         for consent in org.passport_consents:
-            view = {key: value for key, value in consent.items() if key != "preview_hash"}
+            view = {key: value for key, value in consent.items() if key not in {"preview_hash", "values_hash"}}
+            names = consent["fields"]
+            current_values = (set(names) <= set(resolved) and all("value" in resolved[name] for name in names)
+                              and fingerprint({name: resolved[name]["value"] for name in names}) == consent.get("values_hash"))
             view["active"] = (not consent.get("revoked_at") and consent["profile_version"] == org.passport_version
-                              and datetime.fromisoformat(consent["expires_at"]) > utcnow())
+                              and (consent.get("organization_version") is None or consent["organization_version"] == org.version)
+                              and current_values and datetime.fromisoformat(consent["expires_at"]) > utcnow())
             result.append(view)
         return result
 

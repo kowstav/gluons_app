@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
 
 from gluons import audit
 from gluons.authz import Principal, Role
-from gluons.core import conflict_version, forbidden, not_found, utcnow, validation_failed
+from gluons.core import conflict_version, fingerprint, forbidden, not_found, utcnow, validation_failed
 from gluons.db.models import Organization
 from gluons.db.session import tenant_tx
 
@@ -47,6 +48,25 @@ def field_metadata(name: str) -> dict[str, Any]:
     return {"schema_version": 1, "sensitivity": "business_contact" if name in {"support_email", "operational_address"} else "business_profile"}
 
 
+ORGANIZATION_FIELDS = {"business_name": "name", "country": "country", "timezone": "timezone"}
+
+
+def resolved_fields(org: Organization) -> dict[str, Any]:
+    """Resolve confirmed organization values without storing competing copies."""
+    result = {}
+    for name, raw in org.business_passport.items():
+        field = dict(raw)
+        if field.get("source") == "organization" and name in ORGANIZATION_FIELDS:
+            value = getattr(org, ORGANIZATION_FIELDS[name])
+            expected_hash = field.pop("value_hash", None)
+            current = value is not None and fingerprint(value) == expected_hash
+            field["status"] = "confirmed" if current else "stale"
+            if current:
+                field["value"] = value
+        result[name] = field
+    return result
+
+
 def _owner(principal: Principal) -> None:
     principal.require("org:manage")
     if principal.kind != "user" or principal.role != Role.OWNER or not principal.session_id or not principal.user_id:
@@ -54,9 +74,9 @@ def _owner(principal: Principal) -> None:
 
 
 def _view(org: Organization) -> dict[str, Any]:
-    return {"organization_id": org.id, "schema_version": 1, "version": org.passport_version, "fields": org.business_passport,
+    return {"organization_id": org.id, "schema_version": 1, "version": org.passport_version, "fields": resolved_fields(org),
             "organization": {"name": org.name, "country": org.country, "timezone": org.timezone,
-                             "source": "organization_record", "passport_confirmation": "not_confirmed"},
+                             "version": org.version, "source": "organization_record", "passport_confirmation": "review_individual_fields"},
             "notice": "Profile facts do not authorize sharing or provider actions."}
 
 
@@ -95,4 +115,39 @@ def update(principal: Principal, expected_version: int, changes: dict[str, Any])
             audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="passport.updated",
                          actor=principal, resource_type="organization", resource_id=principal.tenant_id,
                          data={"fields": sorted(changes), "passport_version": org.passport_version})
+        return _view(org)
+
+
+def confirm_organization_fields(principal: Principal, names: list[str], expected_version: int,
+                                expected_organization_version: int) -> dict[str, Any]:
+    _owner(principal)
+    if not names or len(set(names)) != len(names) or not set(names) <= set(ORGANIZATION_FIELDS):
+        raise validation_failed("Choose organization name, country or timezone to confirm.")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = session.get(Organization, principal.tenant_id, with_for_update=True)
+        if org is None:
+            raise not_found("Organization")
+        if org.passport_version != expected_version:
+            raise conflict_version(org.passport_version)
+        if org.version != expected_organization_version:
+            raise conflict_version(org.version)
+        if any(not getattr(org, ORGANIZATION_FIELDS[name]) for name in names):
+            raise validation_failed("Fill each selected organization field before confirming it.")
+        if "country" in names and (len(org.country) != 2 or not org.country.isascii() or not org.country.isalpha() or not org.country.isupper()):
+            raise validation_failed("Use an uppercase two-letter organization country before confirming it.")
+        if "timezone" in names:
+            try:
+                ZoneInfo(org.timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise validation_failed("Choose a valid IANA organization timezone before confirming it.") from None
+        fields = dict(org.business_passport)
+        for name in names:
+            fields[name] = {"source": "organization", "source_ref": ORGANIZATION_FIELDS[name],
+                            "value_hash": fingerprint(getattr(org, ORGANIZATION_FIELDS[name])),
+                            "confirmed_at": utcnow().isoformat(), "confirmed_by": principal.user_id, **field_metadata(name)}
+        org.business_passport = fields
+        org.passport_version += 1
+        audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="passport.organization_confirmed",
+                     actor=principal, resource_type="organization", resource_id=principal.tenant_id,
+                     data={"fields": sorted(names), "passport_version": org.passport_version})
         return _view(org)

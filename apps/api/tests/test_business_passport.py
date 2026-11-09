@@ -50,6 +50,41 @@ def test_passport_view_matches_published_contract_example(owner):
     assert actual["notice"] == example["notice"]
 
 
+def test_confirmed_organization_fields_use_one_source_and_turn_stale(world, owner):
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id, with_for_update=True)
+        org.country = "IN"
+        organization_version = org.version
+    result = passport.confirm_organization_fields(owner, ["business_name", "country"], 1, organization_version)
+    assert result["fields"]["country"]["value"] == "IN"
+    assert result["fields"]["country"]["status"] == "confirmed"
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id)
+        assert "value" not in org.business_passport["country"]
+        org.country = "US"
+        org.version += 1
+    stale = passport.get(owner)["fields"]["country"]
+    assert stale["status"] == "stale" and "value" not in stale and "value_hash" not in stale
+    exported = data_export.export_page(owner, "organization")["records"][0]
+    assert exported["country"] == "US" and "value_hash" not in exported["business_passport"]["country"]
+    with pytest.raises(GluonsError) as exc:
+        passport.confirm_organization_fields(owner, ["country"], 2, organization_version)
+    assert exc.value.status == 409
+
+
+def test_invalid_organization_timezone_and_country_are_not_confirmed(world, owner):
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id)
+        org.timezone = "Not/A_Real_Zone"
+        org.country = "in"
+        version = org.version
+    for name in ("country", "timezone"):
+        with pytest.raises(GluonsError) as exc:
+            passport.confirm_organization_fields(owner, [name], 1, version)
+        assert exc.value.status == 422
+    assert passport.get(owner)["fields"] == {}
+
+
 def test_concurrent_edits_cannot_overwrite_one_another(owner):
     def edit(name):
         try:
@@ -101,6 +136,12 @@ def test_authenticated_api_rejects_extra_fields_and_stale_versions(world):
                             "fields": {"brand_name": "Stale"}}).status_code == 409
         assert client.patch("/v1/business-passport", headers=headers, json={"expected_version": 2,
                             "fields": {"password": "not-allowed"}}).status_code == 422
+        current = client.get("/v1/business-passport").json()
+        response = client.post("/v1/business-passport/organization-fields/confirm", headers=headers,
+                               json={"fields": ["business_name"], "expected_version": current["version"],
+                                     "expected_organization_version": current["organization"]["version"]})
+        assert response.status_code == 200
+        assert response.json()["fields"]["business_name"]["value"] == current["organization"]["name"]
 
 
 @pytest.mark.parametrize("fields", [

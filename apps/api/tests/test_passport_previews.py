@@ -107,6 +107,26 @@ def test_expired_preview_cannot_create_consent(owner, monkeypatch):
     assert passport_previews.list_consents(owner) == []
 
 
+def test_changed_organization_field_invalidates_preview_and_existing_consent(world, owner):
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id)
+        org.country = "IN"
+        organization_version = org.version
+    passport.confirm_organization_fields(owner, ["country"], 1, organization_version)
+    token = passport_previews.preview_share(owner, "shopify", ["country"], "account_setup")["preview_token"]
+    passport_previews.confirm_share(owner, token)
+    assert passport_previews.list_consents(owner)[0]["active"] is True
+    with tenant_tx(world.tenant_id) as session:
+        org = session.get(Organization, world.tenant_id)
+        org.country = "US"
+        org.version += 1
+    assert passport_previews.list_consents(owner)[0]["active"] is False
+    with pytest.raises(GluonsError):
+        passport_previews.confirm_share(owner, token)
+    with pytest.raises(GluonsError):
+        passport_previews.preview_share(owner, "shopify", ["country"], "account_setup")
+
+
 def test_authenticated_http_preview_confirm_and_revoke(world, owner):
     passport.update(owner, 1, {"currency": "INR"})
     with TestClient(create_app()) as client:

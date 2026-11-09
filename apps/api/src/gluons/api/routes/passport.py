@@ -22,6 +22,13 @@ class ImportPreview(BaseModel):
     connection_id: str = Field(min_length=1, max_length=40)
 
 
+class ConfirmOrganizationFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fields: list[Literal["business_name", "country", "timezone"]] = Field(min_length=1, max_length=3)
+    expected_version: int = Field(ge=1)
+    expected_organization_version: int = Field(ge=1)
+
+
 class SharePreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: Literal["gmail", "shopify"]
@@ -43,6 +50,11 @@ def get_passport(principal: PrincipalDep, response: Response) -> dict:
 @router.patch("")
 def update_passport(body: UpdatePassport, principal: PrincipalDep) -> dict:
     return passport.update(principal, body.expected_version, body.fields.model_dump(exclude_unset=True, mode="json"))
+
+
+@router.post("/organization-fields/confirm")
+def confirm_organization_fields(body: ConfirmOrganizationFields, principal: PrincipalDep) -> dict:
+    return passport.confirm_organization_fields(principal, body.fields, body.expected_version, body.expected_organization_version)
 
 
 @router.post("/imports/preview")

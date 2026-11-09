@@ -69,7 +69,9 @@ def _view(item: dict[str, Any], connection: ConnectionSession | None = None, acc
         elif status in {"expired", "cancelled", "failed"}:
             actions = [{"code": "restart_connection", "label": "Restart the connection"}]
         elif status == "authorized":
-            if (account is None or account.status != "connected" or account.disconnected_at is not None or not account.credential_ref
+            if (account is None or account.provider != connection.provider or not account.external_account_id
+                    or account.status != "connected" or account.disconnected_at is not None or not account.credential_ref
+                    or (account.provider == "gmail" and account.metadata_json.get("account_email") != account.account_display)
                     or (account.token_expires_at is not None and account.token_expires_at <= utcnow())):
                 actions = [{"code": "reconnect_account", "label": "Reconnect the account", "owner_url": "/connections"}]
             elif account.account_confirmed_at is None:
@@ -216,9 +218,11 @@ def request_connection(principal: Principal, setup_id: str, *, provider: str, ca
             raise conflict_version(item["version"])
         if existing is not None and existing.status not in {"cancelled", "failed"} and existing.expires_at > utcnow():
             account = session.get(Connection, existing.connection_id) if existing.connection_id else None
-            if (existing.status != "authorized" or (account is not None and account.status == "connected"
+            if (existing.status != "authorized" or (account is not None and account.provider == existing.provider
+                    and account.external_account_id and account.status == "connected"
                     and account.disconnected_at is None and account.credential_ref
                     and (account.token_expires_at is None or account.token_expires_at > utcnow())
+                    and (account.provider != "gmail" or account.metadata_json.get("account_email") == account.account_display)
                     and set(existing.requested_scopes).issubset(set(account.granted_scopes)))):
                 raise conflict("Continue the existing connection handoff before starting another.")
         created = connection_service.begin_session_in_transaction(session, principal, provider, capabilities=capabilities,
