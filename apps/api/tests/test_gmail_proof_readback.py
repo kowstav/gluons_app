@@ -21,7 +21,8 @@ from helpers import PASSWORD, World
 
 
 @pytest.fixture
-def proof_case(world):
+def proof_case(world, monkeypatch):
+    monkeypatch.setattr(gmail_proof.google, "identity", lambda token: {"sub": "synthetic-subject", "email": "owner@example.com"})
     key = new_id("key")
     payload = SendEmail(to="test-recipient@example.com", subject="Synthetic test", body="No customer data.")
     raw = base64.urlsafe_b64encode(_content(payload, key, "owner@example.com")).decode()
@@ -55,7 +56,7 @@ def test_owner_reads_again_without_writes_or_private_data(proof_case):
     result = gmail_proof.readback(owner, receipt_id, transport=httpx.MockTransport(provider))
     assert len(calls) == 1 and calls[0].method == "GET"
     assert result["found"] is True and result["matches"] is True and result["receipt_modified"] is False
-    assert result["scope"] == "sent_mail_readback_not_delivery" and result["account_identity_reverified"] is False
+    assert result["scope"] == "sent_mail_readback_not_delivery" and result["account_identity_reverified"] is True
     assert "msg123" not in str(result) and "test-recipient" not in str(result) and raw not in str(result)
     with tenant_tx(owner.tenant_id, owner.user_id) as session:
         assert session.get(ActionReceipt, receipt_id).verified is True
@@ -74,6 +75,30 @@ def test_wrong_provider_message_id_cannot_match(proof_case):
     owner, receipt_id, _, raw = proof_case
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"id": "other", "raw": raw, "labelIds": ["SENT"]}))
     assert gmail_proof.readback(owner, receipt_id, transport=transport)["matches"] is False
+
+
+@pytest.mark.parametrize("identity", [{"sub": "different-account", "email": "owner@example.com"},
+                                       {"sub": "synthetic-subject", "email": "other@example.com"}])
+def test_wrong_provider_identity_never_reads_sent_mail(proof_case, monkeypatch, identity):
+    owner, receipt_id, _, _ = proof_case
+    monkeypatch.setattr(gmail_proof.google, "identity", lambda token: identity)
+    with pytest.raises(GluonsError) as error:
+        gmail_proof.readback(owner, receipt_id, transport=httpx.MockTransport(lambda request: pytest.fail("must not read Gmail")))
+    assert error.value.code == "PROOF_READBACK_UNAVAILABLE"
+
+
+def test_disconnect_between_identity_and_readback_stops_request(world, proof_case, monkeypatch):
+    owner, receipt_id, connection_id, _ = proof_case
+
+    def identity(token):
+        with tenant_tx(world.tenant_id, world.user_id) as session:
+            session.get(Connection, connection_id).status = "disconnected"
+        return {"sub": "synthetic-subject", "email": "owner@example.com"}
+
+    monkeypatch.setattr(gmail_proof.google, "identity", identity)
+    with pytest.raises(GluonsError) as error:
+        gmail_proof.readback(owner, receipt_id, transport=httpx.MockTransport(lambda request: pytest.fail("must not read Gmail")))
+    assert error.value.code == "PROOF_READBACK_UNAVAILABLE"
 
 
 def test_http_route_requires_owner_session_and_returns_sanitized_result(world, proof_case, monkeypatch):

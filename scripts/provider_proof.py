@@ -88,6 +88,7 @@ def summarize(run: Any, *, provider: str, action: str, environment: str) -> dict
         "provider_object_present": bool(receipt.get("provider_object_id")),
         "gateway_readback_present": bool(receipt.get("readback")),
         "independent_provider_evidence": "not_collected",
+        "account_identity_reverified": False,
         "review_status": "pending",
     }
 
@@ -128,11 +129,12 @@ def collect(origin: str, session: str, run_id: str, *, provider: str, action: st
             observed = _get_json(client, f"{base}/v1/proofs/gmail/receipts/{receipt_id}/readback", session)
             if (not isinstance(observed, dict) or observed.get("provider") != provider
                     or observed.get("environment") != environment or observed.get("scope") != "sent_mail_readback_not_delivery"
-                    or observed.get("receipt_modified") is not False or observed.get("account_identity_reverified") is not False
+                    or observed.get("receipt_modified") is not False or observed.get("account_identity_reverified") is not True
                     or type(observed.get("matches")) is not bool
                     or type(observed.get("found")) is not bool):
                 raise ValueError("Invalid independent readback response")
             summary["independent_provider_evidence"] = "matched" if observed["found"] and observed["matches"] else "mismatch"
+            summary["account_identity_reverified"] = True
         return summary
 
 

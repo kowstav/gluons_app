@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import re
+import secrets
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 
 from gluons.actions import ConnectorContext, ProviderError, ProviderResult
 from gluons.authz import Principal, Role
+from gluons.connections import google
 from gluons.connections.service import get_credential
 from gluons.connectors.gmail import GMAIL_READ_SCOPE, GmailSendConnector, SendEmail, _message_id
 from gluons.core import GluonsError, fingerprint, forbidden, not_found, utcnow
@@ -46,22 +49,36 @@ def readback(principal: Principal, receipt_id: str, *, transport: Any = None) ->
         connection_id = connection.id
         environment = receipt.environment
         account_id = connection.external_account_id
+        confirmed_email = connection.account_display
         metadata = dict(connection.metadata_json or {})
 
     def credentials() -> dict[str, Any]:
         with tenant_tx(principal.tenant_id, principal.user_id) as session:
             current = session.get(Connection, connection_id, with_for_update=True)
             if (current is None or current.provider != "gmail" or current.environment != environment or current.external_account_id != account_id
+                    or current.account_display.casefold() != confirmed_email.casefold()
                     or current.account_confirmed_at is None
                     or GMAIL_READ_SCOPE not in current.granted_scopes):
                 raise GluonsError("PROOF_CONNECTION_UNAVAILABLE", "The Gmail connection is no longer available.", status=409)
             return get_credential(session, principal.tenant_id, current)
 
-    context = ConnectorContext(principal.tenant_id, connection_id, "gmail", environment, account_id,
-                               metadata, credentials, transport)
     try:
+        first = credentials()
+        access_token = first.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise GluonsError("PROOF_CONNECTION_UNAVAILABLE", "The Gmail connection is no longer available.", status=409)
+        identity = google.identity(access_token)
+        if (identity.get("sub") != account_id or not isinstance(identity.get("email"), str)
+                or identity["email"].casefold() != confirmed_email.casefold()):
+            raise GluonsError("PROOF_IDENTITY_MISMATCH", "The Gmail identity no longer matches the confirmed account.", status=409)
+        current = credentials()
+        current_token = current.get("access_token")
+        if not isinstance(current_token, str) or not secrets.compare_digest(access_token, current_token):
+            raise GluonsError("PROOF_CONNECTION_CHANGED", "The Gmail connection changed; retry the readback.", status=409)
+        context = ConnectorContext(principal.tenant_id, connection_id, "gmail", environment, account_id,
+                                   metadata, lambda: current, transport)
         observed = GmailSendConnector().verify(context, payload, result)
-    except (ProviderError, GluonsError) as exc:
+    except (ProviderError, GluonsError, httpx.HTTPError, ValueError, TypeError) as exc:
         raise GluonsError("PROOF_READBACK_UNAVAILABLE", "Gmail readback could not be completed; review the connection.", status=502) from exc
     return {
         "provider": "gmail",
@@ -70,6 +87,6 @@ def readback(principal: Principal, receipt_id: str, *, transport: Any = None) ->
         "matches": observed.found and observed.matches and observed.record.get("id") == result.provider_object_id,
         "observed_at": utcnow().isoformat(),
         "scope": "sent_mail_readback_not_delivery",
-        "account_identity_reverified": False,
+        "account_identity_reverified": True,
         "receipt_modified": False,
     }
