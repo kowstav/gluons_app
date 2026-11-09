@@ -6,7 +6,7 @@ The next outcome is **one repeatable, owner-authorized business workflow with a 
 
 ## Read in this order
 
-Publication is complete in private [kowstav/gluons_app](https://github.com/kowstav/gluons_app). **Start Agent A with EX-00:** first CI functional checks passed, but dependency and all three image security scans failed. See the [verification ledger](06_VERIFICATION_AND_RELEASE.md) for exact evidence and remediation. G0 remains open.
+Publication is complete in [kowstav/gluons_app](https://github.com/kowstav/gluons_app); the owner made the repository public on November 9. **Start Agent A with EX-00:** the security fixes passed CI on the integration branch and draft pull request. See the [verification ledger](06_VERIFICATION_AND_RELEASE.md) for exact evidence and remaining integration and runtime gates.
 
 1. [Current progress and evidence](01_PROGRESS_AUDIT.md): what exists, what GitHub contains, what is unverified.
 2. [Master-context review](02_MASTER_PLAN_REVIEW.md): reconciliation of the November 8 proposal with the implemented product.
