@@ -42,8 +42,19 @@ def isolated_proof_enabled() -> bool:
     if (Path(settings.skills_dir).resolve() != (assets / "skills").resolve()
             or Path(settings.blueprint_dir).resolve() != (assets / "blueprint").resolve()):
         return False
+    def local_database(raw: str) -> bool:
+        url = make_url(raw)
+        # libpq's query parameters can override the authority host. Reject IP
+        # overrides and mixed/multiple hosts; Unix sockets must be explicit paths.
+        socket = url.query.get("host")
+        if "hostaddr" in url.query:
+            return False
+        if socket is not None:
+            return url.host is None and isinstance(socket, str) and socket.startswith("/") and "," not in socket
+        return url.host in {"127.0.0.1", "localhost", "::1"}
+
     try:
-        return all(make_url(url).host in {"127.0.0.1", "localhost", "::1"} for url in
+        return all(local_database(url) for url in
                    (settings.database_url, settings.system_database_url, settings.migration_database_url))
     except (ArgumentError, ValueError, TypeError):
         return False

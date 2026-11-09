@@ -158,6 +158,22 @@ def test_nonisolated_configuration_cannot_reach_provider(proof_world, monkeypatc
     assert result.status == "failed"
 
 
+@pytest.mark.parametrize("url,allowed", [
+    ("postgresql://user@/db?host=/tmp/local-postgres", True),
+    ("postgresql://user@127.0.0.1/db", True),
+    ("postgresql://user@127.0.0.1/db?host=remote.example", False),
+    ("postgresql://user@127.0.0.1/db?hostaddr=192.0.2.1", False),
+    ("postgresql://user@/db?host=/tmp/local,remote.example", False),
+    ("postgresql://user@/db", False),
+])
+def test_isolation_guard_handles_local_sockets_and_rejects_remote_overrides(isolated_registry, monkeypatch, url, allowed):
+    from gluons.connectors.gmail_self_proof import isolated_proof_enabled
+
+    for name in ("database_url", "system_database_url", "migration_database_url"):
+        monkeypatch.setattr(get_settings(), name, url)
+    assert isolated_proof_enabled() is allowed
+
+
 def test_account_identity_mismatch_never_sends(proof_world, monkeypatch):
     from gluons.connectors import gmail_self_proof
 
