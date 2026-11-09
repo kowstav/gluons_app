@@ -13,6 +13,7 @@ from gluons.authz import Principal, Role
 from gluons.connections import google
 from gluons.connections.service import get_credential
 from gluons.connectors.gmail import GMAIL_READ_SCOPE, GmailSendConnector, SendEmail, _message_id
+from gluons.connectors.gmail_self_proof import ACTION as SELF_PROOF_ACTION
 from gluons.core import GluonsError, fingerprint, forbidden, not_found, utcnow
 from gluons.db.models import ActionReceipt, Connection
 from gluons.db.session import tenant_tx
@@ -28,7 +29,7 @@ def readback(principal: Principal, receipt_id: str, *, transport: Any = None) ->
         if receipt is None:
             raise not_found("Receipt")
         connection = session.get(Connection, receipt.connection_id) if receipt.connection_id else None
-        if (receipt.provider != "gmail" or receipt.action != "email.send" or receipt.mode not in ("supervised", "live")
+        if (receipt.provider != "gmail" or receipt.action not in ("email.send", SELF_PROOF_ACTION) or receipt.mode not in ("supervised", "live")
                 or receipt.status != "succeeded" or not receipt.verified or receipt.verified_at is None or not receipt.provider_object_id
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", receipt.provider_object_id)):
             raise GluonsError("PROOF_RECEIPT_INVALID", "A verified Gmail send receipt is required.", status=409)

@@ -111,7 +111,7 @@ def collect(origin: str, session: str, run_id: str, *, provider: str, action: st
         raise ValueError("A valid Gluons session is required")
     if not _IDENTIFIER.fullmatch(run_id):
         raise ValueError("Invalid run identifier")
-    if (provider, action) != ("gmail", "email.send"):
+    if provider != "gmail" or action not in {"email.send", "proof.gmail.self_send"}:
         raise ValueError("Only the selected Gmail connector proof is supported")
     if environment not in _ENVIRONMENTS:
         raise ValueError("Invalid evidence environment")
@@ -143,7 +143,7 @@ def main() -> int:
     parser.add_argument("--api-origin", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--provider", required=True, choices=("gmail",))
-    parser.add_argument("--action", required=True, choices=("email.send",))
+    parser.add_argument("--action", required=True, choices=("email.send", "proof.gmail.self_send"))
     parser.add_argument("--environment", required=True, choices=sorted(_ENVIRONMENTS))
     parser.add_argument("--independent-readback", action="store_true", help="Request a fresh owner-only Gmail readback")
     args = parser.parse_args()

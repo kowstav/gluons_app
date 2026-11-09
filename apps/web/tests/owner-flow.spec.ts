@@ -58,6 +58,14 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByLabel("Monthly budget (USD)", { exact: true }).fill("5");
   await page.getByRole("button", { name: "Create draft automation" }).click();
   await expect(page.getByRole("heading", { name: `Browser Order Trial ${id}`, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "permissions", exact: true }).click();
+  await page.getByLabel("Allowed action names").fill("email.send");
+  await page.getByLabel("Only this email recipient (optional)").fill("proof@example.com");
+  await page.getByLabel("Policy expiration (optional)").fill("2099-01-01T12:00");
+  await page.getByRole("button", { name: "Propose policy", exact: true }).click();
+  await expect(page.getByText("Policy proposed. Review and sign it before activation.")).toBeVisible();
+  await expect(page.getByText(/"allowed_recipients"/)).toContainText("proof@example.com");
+  await expect(page.getByText(/"allowed_recipients"/)).toContainText('"expires_at"');
   await page.getByRole("button", { name: "Start shadow trial", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("start-trial recorded");
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();

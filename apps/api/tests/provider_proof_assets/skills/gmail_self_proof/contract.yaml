@@ -1,0 +1,42 @@
+id: gluons.gmail_self_proof
+slug: gmail_self_proof
+version: 1.0.0
+title: Isolated Gmail self-test
+domain: proof
+risk_tier: R3
+activation_modes: [supervised]
+inputs: {type: object, additionalProperties: false}
+outputs: {type: object}
+connectors:
+  - capability: email
+    providers: [gmail]
+    purpose: Send a single synthetic self-test to the confirmed Gmail account.
+    scopes:
+      gmail:
+        - https://www.googleapis.com/auth/gmail.send
+        - https://www.googleapis.com/auth/gmail.readonly
+actions: [proof.gmail.self_send]
+default_policy:
+  mode: supervised
+  allowed_actions: [proof.gmail.self_send]
+graph:
+  entry: send_self_test
+  nodes:
+    send_self_test:
+      primitive: domain
+      params: {fn: proof.gmail_self_send}
+      blueprint_steps: [1]
+      checkpoint: true
+      next: finish
+      branches: {denied: stop}
+    finish:
+      primitive: complete
+      params: {requires_verified: [proof.gmail.self_send], report: [proof_receipt]}
+      blueprint_steps: [2]
+    stop:
+      primitive: escalate
+      params: {summary: The isolated self-test was not authorized.}
+failure_handling: {}
+metrics: []
+limitations:
+  - Isolated local/test proof only; never a customer workflow or delivery proof.

@@ -13,6 +13,7 @@ from gluons.api.app import create_app
 from gluons.authz import Role
 from gluons.connections import gmail_proof
 from gluons.connectors.gmail import GMAIL_READ_SCOPE, GmailSendConnector, SendEmail, _content, _message_id
+from gluons.connectors.gmail_self_proof import ACTION as SELF_PROOF_ACTION
 from gluons.core import GluonsError, fingerprint, new_id, utcnow
 from gluons.db.models import ActionReceipt, Connection
 from gluons.db.session import tenant_tx
@@ -69,6 +70,17 @@ def test_mismatch_stays_observation_not_receipt_mutation(proof_case):
     assert result["matches"] is False and result["receipt_modified"] is False
     with tenant_tx(owner.tenant_id, owner.user_id) as session:
         assert session.get(ActionReceipt, receipt_id).verified is True
+
+
+def test_verified_self_proof_can_be_read_back(world, proof_case):
+    owner, receipt_id, _, raw = proof_case
+    with tenant_tx(world.tenant_id, world.user_id) as session:
+        receipt = session.get(ActionReceipt, receipt_id)
+        receipt.action = SELF_PROOF_ACTION
+        receipt.payload_hash = fingerprint({"action": SELF_PROOF_ACTION, "connection_id": receipt.connection_id,
+                                            "input": receipt.expected})
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"id": "msg123", "raw": raw, "labelIds": ["SENT"]}))
+    assert gmail_proof.readback(owner, receipt_id, transport=transport)["matches"] is True
 
 
 def test_wrong_provider_message_id_cannot_match(proof_case):

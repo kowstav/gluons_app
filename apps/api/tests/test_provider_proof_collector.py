@@ -108,6 +108,12 @@ def test_no_session_or_other_action_can_issue_a_request():
                       environment="production", transport=transport)
 
 
+def test_synthetic_proof_action_keeps_its_distinct_label():
+    result = proof.summarize({"receipts": [receipt(action="proof.gmail.self_send")]}, provider="gmail",
+                             action="proof.gmail.self_send", environment="sandbox")
+    assert result["action"] == "proof.gmail.self_send" and result["review_status"] == "pending"
+
+
 def test_explicit_readback_is_second_get_and_does_not_expose_receipt_id():
     requests = []
 

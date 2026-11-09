@@ -115,3 +115,7 @@ Google refresh tokens can be revoked, or expire weekly while a consent screen is
 
 ## ADR-029 Deletion purges after a grace period and keeps signed history
 A deletion request closes access at once. After `GLUONS_DELETION_GRACE_DAYS` (default 30), the purge deletes leaf business records and clears the content of rows that kept history points to: runs, approvals, automations, plans and business facts. Audit events, approval decisions, run events, usage and action receipts stay as the accountability record, and the audit chain still verifies afterwards. How long that record is kept needs legal review per jurisdiction.
+
+## ADR-030 Isolated Gmail self-proof
+
+The first provider proof uses a test-only skill and action in an explicitly enabled local environment with a loopback database and isolated skill catalog. It follows the existing gateway, signed policy, owner approval, receipt, and Gmail readback boundaries. The fixed synthetic message can go only to the confirmed account, with a narrowly scoped policy expiring within 24 hours and a stable automation-wide idempotency key. Authority and connection state are rechecked under database locks immediately before the write; an uncertain outcome is reconciled instead of blindly resent. The test fixture does not change the historical blueprint or establish production readiness, delivery, or a real-provider result. Real execution requires separate owner authorization and private evidence.
