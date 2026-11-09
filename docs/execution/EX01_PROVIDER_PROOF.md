@@ -6,6 +6,8 @@ This is an opt-in preparation path. A collector result is not permission to perf
 
 An owner must separately approve a bounded test in a private operational record. Record the participating business and account, environment, exact action, synthetic fixture and destination, maximum number of effects, time window, budget, responsible operator, stop control, and owner escalation route. Confirm that the connection has the required scopes and a signed owner policy and any payload-bound approval. A manifest, connection, this script, or a successful login does not grant authority. Do not use a real customer or send a message without the applicable explicit owner authorization.
 
+The policy proposal API accepts an optional timezone-aware `expires_at`; the existing signature binds the deadline and the gateway rejects an expired policy. This permits a time-bounded grant, but does not by itself impose a one-message limit or replace the exact owner approval.
+
 The [example manifest](fixtures/gmail-proof.example.json) is deliberately unapproved, has no recipient or mailbox, and is not executable. Keep the filled owner grant and private references outside Git. Its maximum is a proposed limit, not permission to send.
 
 The founder selected Gmail `email.send` as the first connector proof. This does not select an inbound order channel or a system of record. Gmail connections currently default to the `production` environment even for a test mailbox; do not relabel a real Gmail account as a provider sandbox. A Gmail Sent-mail readback does not prove recipient delivery. Provider credentials must remain in Gluons vault or the approved secret store, never in fixtures, source, command arguments, or evidence artifacts.

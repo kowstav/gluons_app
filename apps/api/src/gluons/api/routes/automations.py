@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from gluons import policy, tasks
 from gluons.api.deps import IdempotencyKey, PrincipalDep, SessionDep, idempotent
@@ -76,6 +76,7 @@ class PolicyProposal(BaseModel):
     per_action_limit_minor: int | None = Field(default=None, ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     data_disclosures: list[Any] = Field(default_factory=list)
+    expires_at: AwareDatetime | None = None
 
 
 @router.get("/skills", tags=["skills"])
