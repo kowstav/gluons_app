@@ -317,6 +317,7 @@ class Organization(Base):
     business_facts: Mapped[dict] = _json()
     business_passport: Mapped[dict] = _json()
     passport_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    setup_sessions: Mapped[dict] = _json()
     emergency_stop_at: Mapped[datetime | None] = _ts()
     emergency_stop_by: Mapped[str | None] = mapped_column(String(40))
     paused_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")

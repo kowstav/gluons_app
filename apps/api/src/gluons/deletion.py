@@ -172,7 +172,7 @@ SCRUBBED = {"runs": ("input", "state", "outcome", "error"),
             "approvals": ("summary", "records_before", "records_after_preview", "source_evidence", "resolution"),
             "automations": ("config", "trigger", "model_policy"),
             "plans": ("goal", "business_context", "graph", "required_connections", "side_effects", "cost_estimate"),
-            "organizations": ("business_facts", "business_passport")}
+            "organizations": ("business_facts", "business_passport", "setup_sessions")}
 # Workers may carry rows for any tenant; the app role cannot delete from them.
 SYSTEM_PURGED = ("jobs", "outbox", "webhook_inbox")
 
