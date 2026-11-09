@@ -2,6 +2,8 @@
 
 Status: implementation in progress, November 9. EX-00 base: `cf5a3832af75dad81b6a53e8e4400f61d7d96f3a`. This document is a contract decision, not a claim that onboarding or a provider redirect has been verified.
 
+Synthetic response examples for downstream implementation: [Passport view](contracts/passport-view.example.json) and [setup view](contracts/setup-view.example.json). These show no real account data or tokens; the server remains the authority for current state and authorization.
+
 ## Source of truth
 
 `Organization.business_facts` is an untyped legacy field that existing organization APIs can replace. It cannot serve as confirmed profile evidence. Store the typed Passport in a separate organization-owned JSONB column with a dedicated version, protected by the existing forced organization RLS and a row lock for optimistic concurrency. This is the single authority for Passport fields; do not automatically copy untyped facts or provider JSON into it. Organization name, country and timezone remain authoritative in the existing organization record; any presentation of these as Passport suggestions must clearly mark them unconfirmed until an explicit confirmation establishes provenance. No migration should automatically classify old data as owner-confirmed.
@@ -14,7 +16,7 @@ A durable setup session must reference existing launch and connection sessions, 
 
 ## Migration and data rights
 
-Additive migration `0011` adds the Passport column and version to `organizations` rather than adding tenant tables. Migration `0012` adds bounded setup records and `0013` adds bounded sharing-consent history to the same row, so the existing organization lock and forced RLS cover session creation, updates and token redemption. Existing installations start empty and old facts remain untouched. Structured exports include typed Passport values, provenance, sanitized consent history and a setup summary, without token or idempotency hashes. The existing organization purge clears these fields after its normal grace period. Downgrading these columns discards data, so rollback should normally leave the additive schema in place and disable the feature. No provider access or writes are authorized by this decision.
+Additive migration `0011` adds the Passport column and version to `organizations` rather than adding tenant tables. Migration `0012` adds bounded setup records and `0013` adds bounded sharing-consent history to the same row, so the existing organization lock and forced RLS cover session creation, updates and token redemption. Existing installations start empty and old facts remain untouched. Structured exports include typed Passport values, provenance, sanitized consent history and a setup summary, without token or idempotency hashes. Consent history retains field names and grant metadata, not copies of field values, with a 200-record limit pending a reviewed retention policy. The existing organization purge clears these fields after its normal grace period. Downgrading these columns discards data, so rollback should normally leave the additive schema in place and disable the feature. No provider access or writes are authorized by this decision.
 
 ## Integration status
 

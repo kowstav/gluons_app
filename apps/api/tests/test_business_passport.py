@@ -1,6 +1,8 @@
 """Passport authorization and data lifecycle on real restricted-role PostgreSQL."""
+import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,6 +38,16 @@ def test_profile_is_versioned_confirmed_and_exported(world, owner):
     assert exported["business_passport"] == result["fields"] and exported["passport_version"] == 2
     removed = passport.update(owner, 2, {"brand_name": None})
     assert "brand_name" not in removed["fields"]
+
+
+def test_passport_view_matches_published_contract_example(owner):
+    path = Path(__file__).resolve().parents[3] / "docs/execution/contracts/passport-view.example.json"
+    example = json.loads(path.read_text(encoding="utf-8-sig"))
+    actual = passport.update(owner, 1, {"currency": "INR"})
+    assert set(actual) == set(example)
+    assert set(actual["organization"]) == set(example["organization"])
+    assert set(actual["fields"]["currency"]) == set(example["fields"]["currency"])
+    assert actual["notice"] == example["notice"]
 
 
 def test_concurrent_edits_cannot_overwrite_one_another(owner):

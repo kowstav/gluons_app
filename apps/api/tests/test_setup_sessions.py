@@ -1,8 +1,10 @@
 """Resumable setup stays tenant-scoped and never grants provider authority."""
+import json
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +26,15 @@ def owner(world):
 
 def create(owner, key="setup-key-123"):
     return setup_sessions.start(owner, intent="business_launch", launch_plan_id=None, idempotency_key=key)
+
+
+def test_setup_view_matches_published_contract_example(owner):
+    path = Path(__file__).resolve().parents[3] / "docs/execution/contracts/setup-view.example.json"
+    example = json.loads(path.read_text(encoding="utf-8-sig"))
+    actual = create(owner)
+    assert set(actual) == set(example)
+    assert set(actual["next_actions"][0]) == set(example["next_actions"][0])
+    assert actual["notice"] == example["notice"]
 
 
 def test_idempotent_create_and_versioned_existing_connection(owner):
