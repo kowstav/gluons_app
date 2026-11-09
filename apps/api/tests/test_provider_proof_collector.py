@@ -116,7 +116,8 @@ def test_explicit_readback_is_second_get_and_does_not_expose_receipt_id():
         if request.url.path == "/v1/runs/run_123":
             return httpx.Response(200, json={"id": "run_123", "receipts": [receipt(id="private-receipt")]})
         return httpx.Response(200, json={"provider": "gmail", "environment": "sandbox", "found": True,
-                                        "matches": True, "scope": "sent_mail_readback_not_delivery", "receipt_modified": False})
+                                        "matches": True, "scope": "sent_mail_readback_not_delivery",
+                                        "receipt_modified": False, "account_identity_reverified": False})
 
     result = proof.collect("https://api.example.com", "secret-session", "run_123", provider="gmail", action="email.send",
                            environment="sandbox", independent_readback=True, transport=httpx.MockTransport(handler))

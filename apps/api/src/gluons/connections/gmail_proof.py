@@ -70,5 +70,6 @@ def readback(principal: Principal, receipt_id: str, *, transport: Any = None) ->
         "matches": observed.found and observed.matches and observed.record.get("id") == result.provider_object_id,
         "observed_at": utcnow().isoformat(),
         "scope": "sent_mail_readback_not_delivery",
+        "account_identity_reverified": False,
         "receipt_modified": False,
     }

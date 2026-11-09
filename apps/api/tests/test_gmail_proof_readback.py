@@ -55,7 +55,7 @@ def test_owner_reads_again_without_writes_or_private_data(proof_case):
     result = gmail_proof.readback(owner, receipt_id, transport=httpx.MockTransport(provider))
     assert len(calls) == 1 and calls[0].method == "GET"
     assert result["found"] is True and result["matches"] is True and result["receipt_modified"] is False
-    assert result["scope"] == "sent_mail_readback_not_delivery"
+    assert result["scope"] == "sent_mail_readback_not_delivery" and result["account_identity_reverified"] is False
     assert "msg123" not in str(result) and "test-recipient" not in str(result) and raw not in str(result)
     with tenant_tx(owner.tenant_id, owner.user_id) as session:
         assert session.get(ActionReceipt, receipt_id).verified is True
