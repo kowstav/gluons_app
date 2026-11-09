@@ -25,6 +25,11 @@ class AttachConnection(Version):
     connection_session_id: str = Field(min_length=1, max_length=40)
 
 
+class RequestConnection(Version):
+    provider: Literal["gmail"]
+    capabilities: list[str] = Field(min_length=1, max_length=10)
+
+
 class Redeem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     resume_token: str = Field(min_length=20, max_length=300)
@@ -44,6 +49,12 @@ def get(setup_id: str, principal: PrincipalDep, response: Response) -> dict:
 @router.post("/{setup_id}/connection")
 def attach(setup_id: str, body: AttachConnection, principal: PrincipalDep) -> dict:
     return setup_sessions.attach_connection(principal, setup_id, body.connection_session_id, body.expected_version)
+
+
+@router.post("/{setup_id}/connection/request")
+def request_connection(setup_id: str, body: RequestConnection, principal: PrincipalDep, key: IdempotencyKey) -> dict:
+    return setup_sessions.request_connection(principal, setup_id, provider=body.provider, capabilities=body.capabilities,
+                                             expected_version=body.expected_version, idempotency_key=key)
 
 
 @router.post("/{setup_id}/resume-token")

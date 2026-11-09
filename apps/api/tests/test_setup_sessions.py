@@ -6,12 +6,13 @@ from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from gluons import data_export, deletion, identity, setup_sessions
+from gluons import data_export, deletion, identity, setup_sessions, vault
 from gluons.api.app import create_app
 from gluons.connections import service
-from gluons.core import GluonsError, utcnow
-from gluons.db.models import Organization
+from gluons.core import GluonsError, new_id, utcnow
+from gluons.db.models import Connection, ConnectionSession, Organization
 from gluons.db.session import tenant_tx
 from helpers import PASSWORD
 
@@ -38,6 +39,55 @@ def test_idempotent_create_and_versioned_existing_connection(owner):
         setup_sessions.attach_connection(owner, initial["id"], connection["session_id"], 1)
     assert exc.value.status == 409
     assert setup_sessions.get(replace(owner, session_id="new-login"), initial["id"])["connection"] == attached["connection"]
+
+
+def test_connection_request_is_atomic_and_idempotent(world, owner, monkeypatch):
+    setup = create(owner)
+    original = service.begin_session_in_transaction
+
+    def fail_after_create(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("synthetic interruption")
+
+    monkeypatch.setattr(service, "begin_session_in_transaction", fail_after_create)
+    args = {"provider": "gmail", "capabilities": ["read_messages"], "expected_version": 1, "idempotency_key": "connection-key-123"}
+    with pytest.raises(RuntimeError):
+        setup_sessions.request_connection(owner, setup["id"], **args)
+    with tenant_tx(world.tenant_id) as session:
+        assert session.scalars(select(ConnectionSession)).all() == []
+    monkeypatch.setattr(service, "begin_session_in_transaction", original)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: setup_sessions.request_connection(owner, setup["id"], **args), range(2)))
+    assert responses[0] == responses[1] and responses[0]["version"] == 2
+    with tenant_tx(world.tenant_id) as session:
+        assert len(session.scalars(select(ConnectionSession)).all()) == 1
+
+
+def test_next_action_follows_account_confirmation_and_health(world, owner):
+    setup = create(owner)
+    requested = setup_sessions.request_connection(owner, setup["id"], provider="gmail", capabilities=["read_messages"],
+                                                   expected_version=1, idempotency_key="connection-health-key")
+    session_id = requested["connection"]["id"]
+    with tenant_tx(world.tenant_id, world.user_id) as session:
+        handoff = session.get(ConnectionSession, session_id)
+        ref = vault.store(session, world.tenant_id, "gmail", {"access_token": "synthetic"})
+        account = Connection(id=new_id("con"), tenant_id=world.tenant_id, provider="gmail", environment="production",
+                             external_account_id="synthetic-account", account_display="test@example.com", created_by=world.user_id,
+                             credential_ref=ref, status="connected", granted_scopes=handoff.requested_scopes, last_checked_at=utcnow())
+        session.add(account)
+        session.flush()
+        handoff.connection_id, handoff.status = account.id, "authorized"
+        account_id = account.id
+    assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "confirm_account"
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, account_id).account_confirmed_at = utcnow()
+    assert setup_sessions.get(owner, setup["id"])["next_actions"] == []
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, account_id).status = "disconnected"
+    assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "reconnect_account"
+    restarted = setup_sessions.request_connection(owner, setup["id"], provider="gmail", capabilities=["read_messages"],
+                                                   expected_version=2, idempotency_key="connection-restart-key")
+    assert restarted["connection"]["id"] != session_id and restarted["version"] == 3
 
 
 def test_resume_link_is_owner_authenticated_one_use_and_not_exported(world, owner):

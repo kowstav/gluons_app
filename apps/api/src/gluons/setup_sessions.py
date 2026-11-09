@@ -7,6 +7,8 @@ from typing import Any
 
 from gluons import audit
 from gluons.authz import Principal, Role
+from gluons.connections import google
+from gluons.connections import service as connection_service
 from gluons.core import (
     conflict,
     conflict_version,
@@ -20,7 +22,7 @@ from gluons.core import (
     utcnow,
     validation_failed,
 )
-from gluons.db.models import ConnectionSession, LaunchPlan, Organization
+from gluons.db.models import Connection, ConnectionSession, LaunchPlan, Organization
 from gluons.db.session import tenant_tx
 
 MAX_SESSIONS = 50
@@ -46,14 +48,34 @@ def _item(org: Organization, setup_id: str, principal: Principal) -> dict[str, A
     return deepcopy(item)
 
 
-def _view(item: dict[str, Any], connection: ConnectionSession | None = None) -> dict[str, Any]:
+def _view(item: dict[str, Any], connection: ConnectionSession | None = None, account: Connection | None = None) -> dict[str, Any]:
     view = {key: item.get(key) for key in ("id", "intent", "launch_plan_id", "status", "version", "created_at", "connection_session_id")}
     if connection is not None:
         status = "expired" if connection.expires_at <= utcnow() and connection.consumed_at is None else connection.status
         view["connection"] = {"id": connection.id, "provider": connection.provider, "status": status,
-                              "connection_id": connection.connection_id}
+                              "connection_id": connection.connection_id, "requested_scopes": connection.requested_scopes,
+                              "owner_url": f"/setup/{connection.id}"}
+        if status == "needs_configuration":
+            actions = [{"code": "configure_provider", "label": "Configure the provider integration"}]
+        elif status in {"expired", "cancelled", "failed"}:
+            actions = [{"code": "restart_connection", "label": "Restart the connection"}]
+        elif status == "authorized":
+            if (account is None or account.status != "connected" or account.disconnected_at is not None or not account.credential_ref
+                    or (account.token_expires_at is not None and account.token_expires_at <= utcnow())):
+                actions = [{"code": "reconnect_account", "label": "Reconnect the account", "owner_url": "/connections"}]
+            elif account.account_confirmed_at is None:
+                actions = [{"code": "confirm_account", "label": "Review and confirm the connected account", "owner_url": "/connections"}]
+            elif (account.last_checked_at is None or account.last_checked_at < utcnow() - timedelta(hours=24)
+                  or not set(connection.requested_scopes).issubset(set(account.granted_scopes))):
+                actions = [{"code": "verify_account", "label": "Verify the account and required access", "owner_url": "/connections"}]
+            else:
+                actions = []
+        else:
+            actions = [{"code": "continue_connection", "label": "Continue connecting the account", "owner_url": f"/setup/{connection.id}"}]
     else:
         view["connection"] = None
+        actions = [{"code": "connect_provider", "label": "Choose a provider to connect"}]
+    view["next_actions"] = actions
     view["notice"] = "Setup state does not authorize provider access, sharing, or business actions."
     return view
 
@@ -64,6 +86,12 @@ def _connection(session, item: dict[str, Any], principal: Principal) -> Connecti
     if row is not None and row.initiated_by != principal.user_id:
         return None
     return row
+
+
+def _render(session, item: dict[str, Any], principal: Principal) -> dict[str, Any]:
+    connection = _connection(session, item, principal)
+    account = session.get(Connection, connection.connection_id) if connection and connection.connection_id else None
+    return _view(item, connection, account)
 
 
 def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idempotency_key: str) -> dict[str, Any]:
@@ -79,7 +107,7 @@ def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idem
             if item.get("idempotency_hash") == key_hash:
                 if item.get("request_hash") != request_hash:
                     raise conflict("This setup idempotency key belongs to another request.")
-                return _view(item, _connection(session, item, principal))
+                return _render(session, item, principal)
         if len(records) >= MAX_SESSIONS:
             raise conflict("This business has reached its setup-session limit.")
         if launch_plan_id and session.get(LaunchPlan, launch_plan_id) is None:
@@ -99,7 +127,7 @@ def get(principal: Principal, setup_id: str) -> dict[str, Any]:
     _owner(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         item = _item(_org(session, principal), setup_id, principal)
-        return _view(item, _connection(session, item, principal))
+        return _render(session, item, principal)
 
 
 def attach_connection(principal: Principal, setup_id: str, connection_session_id: str, expected_version: int) -> dict[str, Any]:
@@ -122,7 +150,45 @@ def attach_connection(principal: Principal, setup_id: str, connection_session_id
         org.setup_sessions = records
         audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.connection_attached", actor=principal,
                      resource_type="setup_session", resource_id=setup_id, data={"provider": connection.provider})
-        return _view(item, connection)
+        return _render(session, item, principal)
+
+
+def request_connection(principal: Principal, setup_id: str, *, provider: str, capabilities: list[str],
+                       expected_version: int, idempotency_key: str) -> dict[str, Any]:
+    _owner(principal)
+    if provider != "gmail" or not 8 <= len(idempotency_key) <= 200:
+        raise validation_failed("Choose the supported Gmail handoff and a valid idempotency key.")
+    google.scopes_for(capabilities)
+    request_hash = fingerprint({"provider": provider, "capabilities": sorted(capabilities)})
+    key_hash = fingerprint({"owner": principal.user_id, "key": idempotency_key})
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = _org(session, principal, lock=True)
+        item = _item(org, setup_id, principal)
+        existing = _connection(session, item, principal)
+        if item.get("connection_key_hash") == key_hash:
+            if item.get("connection_request_hash") != request_hash:
+                raise conflict("This connection request key belongs to a different request.")
+            return _render(session, item, principal)
+        if item["version"] != expected_version:
+            raise conflict_version(item["version"])
+        if existing is not None and existing.status not in {"cancelled", "failed"} and existing.expires_at > utcnow():
+            account = session.get(Connection, existing.connection_id) if existing.connection_id else None
+            if (existing.status != "authorized" or (account is not None and account.status == "connected"
+                    and account.disconnected_at is None and account.credential_ref
+                    and (account.token_expires_at is None or account.token_expires_at > utcnow())
+                    and set(existing.requested_scopes).issubset(set(account.granted_scopes)))):
+                raise conflict("Continue the existing connection handoff before starting another.")
+        created = connection_service.begin_session_in_transaction(session, principal, provider, capabilities=capabilities,
+                                                                  automation_plan_id=item["launch_plan_id"])
+        connection = session.get(ConnectionSession, created["session_id"])
+        item.update(connection_session_id=connection.id, connection_key_hash=key_hash,
+                    connection_request_hash=request_hash, version=item["version"] + 1)
+        records = deepcopy(org.setup_sessions)
+        records[setup_id] = item
+        org.setup_sessions = records
+        audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.connection_requested",
+                     actor=principal, resource_type="setup_session", resource_id=setup_id, data={"provider": provider})
+        return _render(session, item, principal)
 
 
 def issue_resume_token(principal: Principal, setup_id: str, expected_version: int) -> dict[str, Any]:
@@ -158,4 +224,4 @@ def redeem(principal: Principal, setup_id: str, secret: str) -> dict[str, Any]:
         org.setup_sessions = records
         audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.resumed", actor=principal,
                      resource_type="setup_session", resource_id=setup_id, data={})
-        return _view(item, _connection(session, item, principal))
+        return _render(session, item, principal)
