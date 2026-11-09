@@ -17,6 +17,8 @@ Publication is complete in [kowstav/gluons_app](https://github.com/kowstav/gluon
 7. [Founder actions and measurement](07_FOUNDER_ACTIONS_AND_MEASUREMENT.md): external prerequisites, economics, pilot and business decisions.
 8. [Provider source checks](08_PROVIDER_SOURCE_CHECKS.md): primary references, checked facts and unresolved assumptions.
 
+EX-01 preparation: [Gmail provider-proof notes and read-only collector](EX01_PROVIDER_PROOF.md). The owner selected Gmail connector proof first; the gateway-backed standalone test and any real send remain pending.
+
 ## Give an agent one brief
 
 | Brief | Responsibility | Earliest start |
