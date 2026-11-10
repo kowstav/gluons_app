@@ -354,9 +354,11 @@ def test_publication_is_precisely_owner_approved_and_verified_once(world, owner,
         row = session.get(Automation, automation["id"])
         row.mode, row.status = "live", "active"
         connection = session.get(Connection, connection_id)
-        connection.account_confirmed_at = utcnow()
+        connection.account_confirmed_at = utcnow() - timedelta(seconds=1)
         connection.granted_scopes = ["read_products", "read_publications", "write_publications"]
         session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+        session.add(LaunchEvidence(id=new_id("lev"), tenant_id=world.tenant_id, plan_id=plan["id"], stage="STORE_CONNECTED",
+            kind="store_connection", source="shopify", is_test=True, detail={"connection_id": connection_id, "environment": "sandbox"}))
         proposed = policy.propose(session, owner, row.id, {"mode": "live", "allowed_actions": ["shopify.product.publish"], "connection_ids": [connection_id]})
         policy.sign(session, owner, proposed.id)
     arguments = {"action": "shopify.product.publish", "automation_id": automation["id"], "connection_id": connection_id, "plan_id": plan["id"],
@@ -377,6 +379,31 @@ def test_publication_is_precisely_owner_approved_and_verified_once(world, owner,
         saved = session.get(LaunchPlan, plan["id"])
         assert saved.state["published_product_receipts"] == [published.receipt_id]
     assert service.record_provider_fact(owner, plan["id"], published.receipt_id)["whole_store_launch_verified"] is False
+    projected = launch.get_plan(owner, plan["id"])["readiness"]
+    publication = projected["checks"]["publication"]
+    assert publication["status"] == "blocked" and projected["store_live"] is False
+    assert [item["receipt_id"] for item in publication["recent_individual_receipts"]] == [published.receipt_id]
+    assert publication["recent_individual_receipts"][0]["environment"] == "sandbox"
+    with tenant_tx(world.tenant_id) as session:
+        receipt = session.get(ActionReceipt, published.receipt_id)
+        verified_at = receipt.verified_at
+        receipt.verified_at = utcnow() - timedelta(hours=25)
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+    with tenant_tx(world.tenant_id) as session:
+        session.get(ActionReceipt, published.receipt_id).verified_at = verified_at
+        session.get(ActionReceipt, published.receipt_id).mode = "shadow"
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+    with tenant_tx(world.tenant_id) as session:
+        session.get(ActionReceipt, published.receipt_id).mode = "live"
+        session.get(Connection, connection_id).granted_scopes = ["read_products"]
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+    with tenant_tx(world.tenant_id) as session:
+        connection = session.get(Connection, connection_id)
+        connection.granted_scopes = ["read_products", "read_publications", "write_publications"]
+        connection.disconnected_at = utcnow()
+    assert not launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"].get("recent_individual_receipts")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, connection_id).disconnected_at = None
     other_plan = launch.create_plan(owner, goal="Different shop launch")
     with tenant_tx(world.tenant_id) as session:
         session.get(LaunchPlan, other_plan["id"]).state = {"store_connection_id": connection_id}
@@ -392,6 +419,7 @@ def test_publication_is_precisely_owner_approved_and_verified_once(world, owner,
         service.record_provider_fact(owner, plan["id"], published.receipt_id)
     assert error.value.code == "INSUFFICIENT_EVIDENCE"
     assert published.receipt_id in launch.get_plan(owner, plan["id"])["state"]["published_product_receipts"]
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
 
 
 def test_plan_action_key_cannot_be_reserved_by_two_plans_concurrently(world, owner, monkeypatch):

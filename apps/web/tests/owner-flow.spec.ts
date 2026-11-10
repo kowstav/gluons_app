@@ -138,6 +138,8 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByRole("button", { name: "Create business workspace" }).click();
   await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
   await navigate(page, "Business setup");
+  await expect(page).toHaveURL(/\/business-setup$/);
+  await expect(page.getByRole("heading", { name: "Business setup", exact: true })).toBeVisible();
   await expect(page.getByText(`Second Business ${id}`, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toHaveCount(0);
   await expect(page.getByLabel("Choose saved setup")).toHaveCount(0);
