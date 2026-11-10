@@ -248,16 +248,6 @@ def readiness(principal: Principal, plan_id: str, *, order_id: str | None = None
         return {"plan_id": plan.id, "store_connected": True, **detail, "readiness": readiness_projection.project(session, plan)}
 
 
-def _plan_action_context(plan: LaunchPlan, connection: Connection) -> str:
-    """Bind evidence to stable business intent and the confirmed store identity."""
-    return fingerprint({"plan_id": plan.id, "goal": plan.goal, "country": plan.country,
-                        "product_category": plan.product_category, "budget_usd": str(plan.budget_usd) if plan.budget_usd is not None else None,
-                        "fulfillment_model": plan.fulfillment_model, "connection_id": connection.id,
-                        "provider": connection.provider, "external_account_id": connection.external_account_id,
-                        "environment": connection.environment,
-                        "account_confirmed_at": connection.account_confirmed_at.isoformat() if connection.account_confirmed_at else None})
-
-
 def _reserve_plan_action(principal: Principal, *, plan_id: str, action: str, automation_id: str, connection_id: str,
                          payload: dict, idempotency_key: str) -> gateway.ActionResult | None:
     """Persist one plan-bound intent before the gateway can execute a write."""
@@ -280,7 +270,7 @@ def _reserve_plan_action(principal: Principal, *, plan_id: str, action: str, aut
                 raise not_found("Business launch plan")
             if plan.branch_status in ("PAUSED", "CANCELLED") or plan.state.get("store_connection_id") != connection_id:
                 raise GluonsError("PLAN_NOT_RUNNABLE", "The plan must be running and bound to this store.", status=409)
-            context = _plan_action_context(plan, connection)
+            context = readiness_projection.plan_action_context(plan, connection)
             intent = session.scalar(select(LaunchEvidence).where(LaunchEvidence.kind == "provider_action_intent",
                 LaunchEvidence.detail["key_hash"].as_string() == key_hash))
             expected = {"action": action, "key_hash": key_hash, "payload_hash": payload_hash,
@@ -376,7 +366,7 @@ def record_provider_fact(principal: Principal, plan_id: str, receipt_id: str) ->
         allowed = {"shopify.product.create_draft": "staged_product_receipts", "shopify.product.publish": "published_product_receipts", "shopify.fulfillment.create": "fulfillment_receipts"}
         if (receipt.action not in allowed or not receipt.verified or receipt.status != "succeeded"
                 or receipt.verified_at is None or not receipt.provider_object_id or receipt.readback is None
-                or receipt.connection_id != plan.state.get("store_connection_id") or receipt.mode in ("shadow", "historical_replay")):
+                or receipt.connection_id != plan.state.get("store_connection_id") or receipt.mode not in ("live", "supervised")):
             raise GluonsError("INSUFFICIENT_EVIDENCE", "A verified provider receipt for this plan's connected store is required.", status=409)
         connection = session.get(Connection, receipt.connection_id)
         key_hash = fingerprint({"action": receipt.action, "idempotency_key": receipt.idempotency_key})
@@ -384,7 +374,7 @@ def record_provider_fact(principal: Principal, plan_id: str, receipt_id: str) ->
             LaunchEvidence.kind == "provider_action_intent", LaunchEvidence.detail["key_hash"].as_string() == key_hash))
         if (connection is None or intent is None or intent.detail.get("action") != receipt.action
                 or intent.detail.get("payload_hash") != receipt.payload_hash or intent.detail.get("connection_id") != receipt.connection_id
-                or intent.detail.get("automation_id") != receipt.automation_id or intent.detail.get("context") != _plan_action_context(plan, connection)
+                or intent.detail.get("automation_id") != receipt.automation_id or intent.detail.get("context") != readiness_projection.plan_action_context(plan, connection)
                 or receipt.provider != "shopify" or receipt.environment != connection.environment):
             raise GluonsError("INSUFFICIENT_EVIDENCE", "The receipt is not bound to this plan and current store details.", status=409)
         if plan.branch_status in ("PAUSED", "CANCELLED"):

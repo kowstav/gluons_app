@@ -1,16 +1,62 @@
 """Read-only, fail-closed view of a launch plan's current evidence."""
 from __future__ import annotations
 
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gluons.core import utcnow
-from gluons.db.models import Connection, LaunchEvidence, LaunchPlan
+from gluons.core import fingerprint, utcnow
+from gluons.db.models import ActionReceipt, Connection, LaunchEvidence, LaunchPlan
 
 CONNECTION_MAX_AGE = timedelta(hours=24)
+
+
+def plan_action_context(plan: LaunchPlan, connection: Connection) -> str:
+    """Bind evidence to stable business intent and the confirmed store identity."""
+    return fingerprint({"plan_id": plan.id, "goal": plan.goal, "country": plan.country,
+                        "product_category": plan.product_category, "budget_usd": str(plan.budget_usd) if plan.budget_usd is not None else None,
+                        "fulfillment_model": plan.fulfillment_model, "connection_id": connection.id,
+                        "provider": connection.provider, "external_account_id": connection.external_account_id,
+                        "environment": connection.environment,
+                        "account_confirmed_at": connection.account_confirmed_at.isoformat() if connection.account_confirmed_at else None})
+
+
+def _individual_receipts(session: Session, plan: LaunchPlan, connection: Connection, now: datetime) -> dict[str, list[dict[str, Any]]]:
+    """Show fresh individual readbacks without claiming manifest completeness."""
+    actions = {"shopify.product.create_draft": ("catalog_drafts", {"read_products"}),
+               "shopify.product.publish": ("publication", {"read_products", "read_publications"}),
+               "shopify.fulfillment.create": ("operations_and_fulfillment", {"read_orders"})}
+    found: dict[str, list[dict[str, Any]]] = {value[0]: [] for value in actions.values()}
+    evidence = session.scalars(select(LaunchEvidence).where(LaunchEvidence.plan_id == plan.id,
+        LaunchEvidence.kind == "provider_action", LaunchEvidence.source == "shopify").order_by(LaunchEvidence.recorded_at))
+    for item in evidence:
+        receipt = session.get(ActionReceipt, item.receipt_id) if item.receipt_id else None
+        if receipt is None or receipt.action not in actions:
+            continue
+        category, scopes = actions[receipt.action]
+        if (not scopes <= set(connection.granted_scopes) or receipt.connection_id != connection.id or receipt.provider != "shopify"
+                or receipt.environment != connection.environment or item.is_test != (connection.environment != "production")
+                or receipt.mode not in ("live", "supervised") or receipt.status != "succeeded" or not receipt.verified
+                or receipt.verified_at is None or not now - CONNECTION_MAX_AGE <= receipt.verified_at <= now
+                or item.recorded_at < receipt.verified_at
+                or not receipt.provider_object_id or not receipt.readback or item.detail.get("action") != receipt.action
+                or item.detail.get("provider_object_id") != receipt.provider_object_id):
+            continue
+        key_hash = fingerprint({"action": receipt.action, "idempotency_key": receipt.idempotency_key})
+        intent = session.scalar(select(LaunchEvidence).where(LaunchEvidence.plan_id == plan.id,
+            LaunchEvidence.kind == "provider_action_intent", LaunchEvidence.detail["key_hash"].as_string() == key_hash))
+        if (intent is None or intent.source != "gluons" or intent.is_test != item.is_test or intent.recorded_at > receipt.verified_at
+                or intent.detail.get("action") != receipt.action or intent.detail.get("payload_hash") != receipt.payload_hash
+                or intent.detail.get("connection_id") != connection.id or intent.detail.get("automation_id") != receipt.automation_id
+                or intent.detail.get("context") != plan_action_context(plan, connection)):
+            continue
+        found[category].append({"receipt_id": receipt.id, "evidence_id": item.id, "resource_id": receipt.provider_object_id,
+                                "action": receipt.action, "source": "shopify", "environment": receipt.environment,
+                                "observed_at": receipt.verified_at.astimezone(UTC).isoformat(),
+                                "recheck_after_seconds": int(CONNECTION_MAX_AGE.total_seconds())})
+    return found
 
 
 def project(session: Session, plan: LaunchPlan) -> dict[str, Any]:
@@ -67,6 +113,9 @@ def project(session: Session, plan: LaunchPlan) -> dict[str, Any]:
     }
     for key, action in missing.items():
         checks[key] = {"status": "blocked", "source": None, "observed_at": None, "environment": None, "next_action": action}
+    if status == "verified" and connection is not None:
+        for category, receipts in _individual_receipts(session, plan, connection, now).items():
+            checks[category]["recent_individual_receipts"] = receipts
     return {"plan_id": plan.id, "plan_version": plan.version, "store_live": False, "payment_verified": False,
             "status": "blocked", "checks": checks,
             "limitations": ["Historical observations without current plan, resource and version linkage do not establish launch readiness.",
