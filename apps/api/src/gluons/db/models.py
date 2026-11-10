@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -96,6 +97,42 @@ class IdentitySession(Base):
     last_seen_at: Mapped[datetime | None] = _ts()
     expires_at: Mapped[datetime] = _ts(False)
     revoked_at: Mapped[datetime | None] = _ts()
+
+
+class ExternalIdentityLink(Base):
+    """A verified external subject linked to one canonical Gluons user."""
+
+    __tablename__ = "external_identity_links"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    issuer: Mapped[str] = mapped_column(String(200), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    linked_at: Mapped[datetime] = _created()
+    last_authenticated_at: Mapped[datetime | None] = _ts()
+    revoked_at: Mapped[datetime | None] = _ts()
+    __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_external_identity_subject"),
+                      UniqueConstraint("user_id", "issuer", name="uq_external_identity_user_issuer"))
+
+
+class ExternalIdentityIntent(Base):
+    """Single-use browser-bound sign-in or authenticated linking transaction."""
+
+    __tablename__ = "external_identity_intents"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    browser_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    nonce_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    verifier_sealed: Mapped[str] = mapped_column(Text, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("identity_sessions.id", ondelete="CASCADE"))
+    outer_request_id: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = _ts(False)
+    used_at: Mapped[datetime | None] = _ts()
+    __table_args__ = (CheckConstraint("(purpose = 'login' AND user_id IS NULL AND session_id IS NULL) OR "
+                                     "(purpose = 'link' AND user_id IS NOT NULL AND session_id IS NOT NULL)",
+                                     name="ck_external_identity_intent_purpose"),)
 
 
 class OAuthClient(Base):
