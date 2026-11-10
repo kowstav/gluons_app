@@ -1,5 +1,11 @@
 # Verification and release gates
 
+## Current EX-00 and EX-01 handoff — November 9
+
+EX-00 [PR #1](https://github.com/kowstav/gluons_app/pull/1) was merged into main as `cf5a3832af75dad81b6a53e8e4400f61d7d96f3a`. Earlier entries below are historical snapshots, including their then-pending integration and security failures. The isolated Compose evidence described below does not establish hosted operation, worker recovery or a real provider.
+
+EX-01 [PR #2](https://github.com/kowstav/gluons_app/pull/2), at the then-tested head `d7338784b5aadff49a65fbbc7009a0b6736fc256`, provides an isolated owner-approved Gmail self-test, a sanitized collector and a read-only recheck. [GitHub Actions](https://github.com/kowstav/gluons_app/actions/runs/42659739693) passed all jobs, including 758 backend tests, web checks, dependency audit and three image scans. Local desktop/mobile browser tests and a synthetic-key launcher startup check also passed. An earlier run of commit `905c2a1` failed 14 proof tests because Linux PostgreSQL used Unix sockets; the subsequent guard fix was covered by tests and the passing run above. No real Gmail credentials, message or readback were used. Consult the PR for its current integration and checks; EX-02 and G1 require separate owner access, authorization and real evidence.
+
 ## EX-00 GitHub and Compose follow-up — November 9
 
 The owner made `kowstav/gluons_app` public. The original November 8 private-repository statements below describe historical state. The founder master context, credentials, runtime data and raw private provider evidence remain excluded from publication.

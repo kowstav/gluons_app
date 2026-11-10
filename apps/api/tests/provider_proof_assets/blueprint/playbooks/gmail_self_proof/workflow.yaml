@@ -1,0 +1,13 @@
+id: gluons.gmail_self_proof
+version: 1.0.0
+title: Isolated Gmail self-test
+industry: test-only
+trigger: Explicit synthetic local test event
+owner_outcome: One owner-approved Gmail self-send with Sent-mail readback
+workflow:
+  - step: 1
+    instruction: Request a bounded owner-approved self-send through the gateway.
+  - step: 2
+    instruction: Complete only after an independently read back receipt is verified.
+failure_branches: []
+metrics: []

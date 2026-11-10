@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     gmail_pubsub_topic: str | None = None
     gmail_push_audience: str | None = None
     gmail_push_service_account: str | None = None
+    # Isolated local provider-proof harness only; never enables a send by itself.
+    gmail_proof_enabled: bool = False
 
     meta_app_id: str | None = None
     meta_app_secret: str | None = None
@@ -130,6 +132,8 @@ def validate_for_environment(s: Settings) -> None:
     if not s.hosted:
         return
     problems: list[str] = []
+    if s.gmail_proof_enabled:
+        problems.append("GLUONS_GMAIL_PROOF_ENABLED is restricted to isolated local/test environments")
     if s.vault_kek_b64 == DEV_VAULT_KEK_B64 and not s.kms_key_name:
         problems.append("GLUONS_KMS_KEY_NAME (or a non-default GLUONS_VAULT_KEK_B64) is required")
     if s.signing_key_b64 == DEV_SIGNING_KEY_B64:

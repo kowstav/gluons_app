@@ -1,0 +1,17 @@
+{
+  "purpose": "Gmail connector proof with synthetic content",
+  "status": "UNAPPROVED_EXAMPLE_DO_NOT_SEND",
+  "provider": "gmail",
+  "action": "email.send",
+  "environment": "production",
+  "maximum_external_effects": 1,
+  "recipient": null,
+  "subject": "Gluons synthetic connector proof",
+  "body": "Synthetic test content. No customer or order data.",
+  "mailbox_private_reference": null,
+  "owner_grant_private_reference": null,
+  "authorization_expires_at": null,
+  "budget_limit": null,
+  "operator_private_reference": null,
+  "provider_evidence_private_reference": null
+}

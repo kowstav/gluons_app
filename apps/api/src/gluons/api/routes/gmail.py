@@ -21,6 +21,13 @@ class ConfigureIntake(BaseModel):
     pubsub_subscription: str | None = Field(default=None, max_length=300)
 
 
+@router.get("/proofs/gmail/receipts/{receipt_id}/readback")
+def proof_readback(receipt_id: str, principal: PrincipalDep) -> dict:
+    from gluons.connections import gmail_proof
+
+    return gmail_proof.readback(principal, receipt_id)
+
+
 @router.get("/connections/{connection_id}/gmail/intake")
 def status(connection_id: str, principal: PrincipalDep) -> dict:
     return gmail_sync.intake_status(principal, connection_id)
