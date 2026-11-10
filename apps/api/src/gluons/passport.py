@@ -13,6 +13,8 @@ from gluons.core import conflict_version, fingerprint, forbidden, not_found, utc
 from gluons.db.models import Organization
 from gluons.db.session import tenant_tx
 
+SENSITIVE_MARKERS = re.compile(r"(?i)(?:bearer\s+\S+|(?:password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{16,}|(?<!\d)\d{12,19}(?!\d))")
+
 
 class PassportFields(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -36,10 +38,9 @@ class PassportFields(BaseModel):
     @model_validator(mode="after")
     def reject_credential_markers(self) -> PassportFields:
         # Free-text fields are for ordinary business facts, not credential storage.
-        marker = re.compile(r"(?i)(?:bearer\s+\S+|(?:password|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\s*[:=]|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{16,}|(?<!\d)\d{12,19}(?!\d))")
         for value in self.model_dump(exclude_unset=True).values():
             values = value if isinstance(value, list) else [value]
-            if any(isinstance(item, str) and marker.search(item) for item in values):
+            if any(isinstance(item, str) and SENSITIVE_MARKERS.search(item) for item in values):
                 raise ValueError("Credentials and sensitive identifiers do not belong in the Passport.")
         return self
 
@@ -133,6 +134,8 @@ def confirm_organization_fields(principal: Principal, names: list[str], expected
             raise conflict_version(org.version)
         if any(not getattr(org, ORGANIZATION_FIELDS[name]) for name in names):
             raise validation_failed("Fill each selected organization field before confirming it.")
+        if any(SENSITIVE_MARKERS.search(getattr(org, ORGANIZATION_FIELDS[name])) for name in names):
+            raise validation_failed("Credentials and sensitive identifiers do not belong in the Passport.")
         if "country" in names and (len(org.country) != 2 or not org.country.isascii() or not org.country.isalpha() or not org.country.isupper()):
             raise validation_failed("Use an uppercase two-letter organization country before confirming it.")
         if "timezone" in names:

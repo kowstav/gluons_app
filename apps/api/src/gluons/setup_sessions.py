@@ -28,6 +28,12 @@ from gluons.db.session import tenant_tx
 MAX_SESSIONS = 50
 
 
+def _required_scopes(connection: ConnectionSession) -> set[str]:
+    if connection.provider == "gmail":
+        return {scope for scope in connection.requested_scopes if scope.startswith("https://www.googleapis.com/auth/gmail.")}
+    return set(connection.requested_scopes)
+
+
 def _owner(principal: Principal) -> None:
     principal.require("org:manage")
     if principal.kind != "user" or principal.role != Role.OWNER or not principal.user_id or not principal.session_id:
@@ -77,7 +83,7 @@ def _view(item: dict[str, Any], connection: ConnectionSession | None = None, acc
             elif account.account_confirmed_at is None:
                 actions = [{"code": "confirm_account", "label": "Review and confirm the connected account", "owner_url": "/connections"}]
             elif (account.last_checked_at is None or account.last_checked_at < utcnow() - timedelta(hours=24)
-                  or not set(connection.requested_scopes).issubset(set(account.granted_scopes))):
+                  or not _required_scopes(connection).issubset(set(account.granted_scopes))):
                 actions = [{"code": "verify_account", "label": "Verify the account and required access", "owner_url": "/connections"}]
             else:
                 actions = []
@@ -223,7 +229,7 @@ def request_connection(principal: Principal, setup_id: str, *, provider: str, ca
                     and account.disconnected_at is None and account.credential_ref
                     and (account.token_expires_at is None or account.token_expires_at > utcnow())
                     and (account.provider != "gmail" or account.metadata_json.get("account_email") == account.account_display)
-                    and set(existing.requested_scopes).issubset(set(account.granted_scopes)))):
+                    and _required_scopes(existing).issubset(set(account.granted_scopes)))):
                 raise conflict("Continue the existing connection handoff before starting another.")
         created = connection_service.begin_session_in_transaction(session, principal, provider, capabilities=capabilities,
                                                                   automation_plan_id=item["launch_plan_id"])

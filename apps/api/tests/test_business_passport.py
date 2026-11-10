@@ -77,8 +77,9 @@ def test_invalid_organization_timezone_and_country_are_not_confirmed(world, owne
         org = session.get(Organization, world.tenant_id)
         org.timezone = "Not/A_Real_Zone"
         org.country = "in"
+        org.name = "password=example"
         version = org.version
-    for name in ("country", "timezone"):
+    for name in ("country", "timezone", "business_name"):
         with pytest.raises(GluonsError) as exc:
             passport.confirm_organization_fields(owner, [name], 1, version)
         assert exc.value.status == 422

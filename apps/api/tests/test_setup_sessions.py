@@ -93,8 +93,18 @@ def test_next_action_follows_account_confirmation_and_health(world, owner):
         account_id = account.id
     assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "confirm_account"
     with tenant_tx(world.tenant_id) as session:
-        session.get(Connection, account_id).account_confirmed_at = utcnow()
+        account = session.get(Connection, account_id)
+        account.account_confirmed_at = utcnow()
+        # Match the existing callback's operational Gmail scope requirement.
+        account.granted_scopes = [scope for scope in account.granted_scopes if "/auth/gmail." in scope]
     assert setup_sessions.get(owner, setup["id"])["next_actions"] == []
+    with tenant_tx(world.tenant_id) as session:
+        account = session.get(Connection, account_id)
+        required = list(account.granted_scopes)
+        account.granted_scopes = []
+    assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "verify_account"
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, account_id).granted_scopes = required
     with tenant_tx(world.tenant_id) as session:
         session.get(Connection, account_id).metadata_json = {"account_email": "different@example.com"}
     assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "reconnect_account"
