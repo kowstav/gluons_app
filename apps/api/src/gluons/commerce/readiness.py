@@ -59,6 +59,33 @@ def _individual_receipts(session: Session, plan: LaunchPlan, connection: Connect
     return found
 
 
+def _payment_observation(session: Session, plan: LaunchPlan, connection: Connection, now: datetime) -> dict[str, Any] | None:
+    scope = "read_shopify_payments_accounts"
+    if scope not in connection.granted_scopes:
+        return None
+    evidence = session.scalars(select(LaunchEvidence).where(LaunchEvidence.plan_id == plan.id,
+        LaunchEvidence.kind == "provider_readiness", LaunchEvidence.source == "shopify").order_by(LaunchEvidence.recorded_at.desc()))
+    for item in evidence:
+        detail = item.detail
+        observed_scopes = detail.get("observed_scopes")
+        if (not now - CONNECTION_MAX_AGE <= item.recorded_at <= now or item.is_test != (connection.environment != "production")
+                or detail.get("connection_id") != connection.id or detail.get("store_id") != connection.external_account_id
+                or detail.get("environment") != connection.environment or detail.get("plan_version") != plan.version
+                or detail.get("plan_store_context") != plan_action_context(plan, connection)):
+            continue
+        payments = detail.get("payments")
+        if (not isinstance(observed_scopes, list) or scope not in observed_scopes or not isinstance(payments, dict)
+                or payments.get("status") not in ("setup_completed", "requires_owner_action")):
+            return None
+        if payments.get("setup_completed") is not (payments["status"] == "setup_completed"):
+            return None
+        return {"provider_status": payments["status"], "source": "shopify", "environment": connection.environment,
+                "observed_at": item.recorded_at.astimezone(UTC).isoformat(), "evidence_id": item.id,
+                "recheck_after_seconds": int(CONNECTION_MAX_AGE.total_seconds()), "kyc_verified": False,
+                "live_payments_verified": False}
+    return None
+
+
 def project(session: Session, plan: LaunchPlan) -> dict[str, Any]:
     """Project only facts linked to this plan and its current, checked store.
 
@@ -116,6 +143,9 @@ def project(session: Session, plan: LaunchPlan) -> dict[str, Any]:
     if status == "verified" and connection is not None:
         for category, receipts in _individual_receipts(session, plan, connection, now).items():
             checks[category]["recent_individual_receipts"] = receipts
+        observation = _payment_observation(session, plan, connection, now)
+        if observation is not None:
+            checks["payment_eligibility"]["provider_observation"] = observation
     return {"plan_id": plan.id, "plan_version": plan.version, "store_live": False, "payment_verified": False,
             "status": "blocked", "checks": checks,
             "limitations": ["Historical observations without current plan, resource and version linkage do not establish launch readiness.",

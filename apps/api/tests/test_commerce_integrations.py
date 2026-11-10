@@ -210,19 +210,42 @@ def test_provider_payment_setup_is_not_kyc_or_live_checkout(world, owner, monkey
     plan = launch.create_plan(owner, goal="Owner-authorized shop")
     with tenant_tx(world.tenant_id) as session:
         connection = session.get(Connection, connection_id)
-        connection.account_confirmed_at = utcnow()
+        connection.account_confirmed_at = utcnow() - timedelta(seconds=1)
         connection.granted_scopes = [*connection.granted_scopes, "read_shopify_payments_accounts"]
         session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+        session.add(LaunchEvidence(id=new_id("lev"), tenant_id=world.tenant_id, plan_id=plan["id"], stage="STORE_CONNECTED",
+            kind="store_connection", source="shopify", is_test=True, detail={"connection_id": connection_id, "environment": "sandbox"}))
     mock_oauth(monkeypatch, scopes=["read_products", "write_products", "read_orders", "read_shopify_payments_accounts"])
-    monkeypatch.setattr(shopify, "payment_status", lambda *args: {"setup_completed": True, "kyc_verified": False, "live_payments_verified": False})
+    monkeypatch.setattr(shopify, "payment_status", lambda *args: {"status": "setup_completed", "setup_completed": True, "kyc_verified": False, "live_payments_verified": False})
     report = service.readiness(owner, plan["id"])
     assert report["payments"]["setup_completed"] is True
     assert report["payments"]["kyc_verified"] is False and report["store_live"] is False
+    observed_payment = report["readiness"]["checks"]["payment_eligibility"]["provider_observation"]
+    assert observed_payment["provider_status"] == "setup_completed" and observed_payment["environment"] == "sandbox"
+    assert not observed_payment["kyc_verified"] and not observed_payment["live_payments_verified"]
+    assert report["readiness"]["checks"]["payment_eligibility"]["status"] == "blocked"
+    with tenant_tx(world.tenant_id) as session:
+        connection = session.get(Connection, connection_id)
+        connection.granted_scopes = [scope for scope in connection.granted_scopes if scope != "read_shopify_payments_accounts"]
+    assert "provider_observation" not in launch.get_plan(owner, plan["id"])["readiness"]["checks"]["payment_eligibility"]
+    with tenant_tx(world.tenant_id) as session:
+        connection = session.get(Connection, connection_id)
+        connection.granted_scopes = [*connection.granted_scopes, "read_shopify_payments_accounts"]
+    with tenant_tx(world.tenant_id) as session:
+        session.get(LaunchPlan, plan["id"]).version += 1
+    assert "provider_observation" not in launch.get_plan(owner, plan["id"])["readiness"]["checks"]["payment_eligibility"]
     monkeypatch.setattr(shopify, "order_status", lambda *args: {"is_test": True, "payment_confirmed": True})
     observed = service.readiness(owner, plan["id"], order_id="gid://shopify/Order/123")
     assert observed["test_order_payment_observed"] is True
     assert observed["test_checkout_verified"] is False
     assert observed["readiness"]["checks"]["test_checkout"]["status"] == "blocked"
+    monkeypatch.setattr(shopify, "payment_status", lambda *args: {"status": "unavailable", "setup_completed": False, "kyc_verified": False, "live_payments_verified": False})
+    unavailable = service.readiness(owner, plan["id"])
+    assert "provider_observation" not in unavailable["readiness"]["checks"]["payment_eligibility"]
+    mock_oauth(monkeypatch, scopes=["read_products", "write_products", "read_orders"])
+    missing_scope = service.readiness(owner, plan["id"])
+    assert missing_scope["payments"]["status"] == "permission_required"
+    assert "provider_observation" not in missing_scope["readiness"]["checks"]["payment_eligibility"]
     with pytest.raises(GluonsError):
         service.readiness(World.create().owner, plan["id"])
 
