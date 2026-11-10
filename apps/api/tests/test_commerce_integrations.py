@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
@@ -364,13 +365,57 @@ def test_publication_is_precisely_owner_approved_and_verified_once(world, owner,
     assert waiting.status == "waiting_approval" and writes == []
     with tenant_tx(world.tenant_id) as session:
         approvals.decide(session, owner, waiting.approval_id, "approve")
-    published = service.execute_commerce_action(owner, **arguments)
+    def unavailable_projection(*args):
+        raise GluonsError("INSUFFICIENT_EVIDENCE", "Projection changed", status=409)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "record_provider_fact", unavailable_projection)
+        published = service.execute_commerce_action(owner, **arguments)
+    assert published.verified and any("needs reconciliation" in warning for warning in published.warnings)
     repeated = service.execute_commerce_action(owner, **arguments)
     assert published.verified is True and repeated.duplicate is True and len(writes) == 1
     with tenant_tx(world.tenant_id) as session:
         saved = session.get(LaunchPlan, plan["id"])
         assert saved.state["published_product_receipts"] == [published.receipt_id]
     assert service.record_provider_fact(owner, plan["id"], published.receipt_id)["whole_store_launch_verified"] is False
+    other_plan = launch.create_plan(owner, goal="Different shop launch")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(LaunchPlan, other_plan["id"]).state = {"store_connection_id": connection_id}
+    with pytest.raises(GluonsError) as error:
+        service.record_provider_fact(owner, other_plan["id"], published.receipt_id)
+    assert error.value.code == "INSUFFICIENT_EVIDENCE"
+    with pytest.raises(GluonsError) as error:
+        service.execute_commerce_action(owner, **{**arguments, "plan_id": other_plan["id"]})
+    assert error.value.code == "PLAN_ACTION_MISMATCH" and len(writes) == 1
+    with tenant_tx(world.tenant_id) as session:
+        session.get(LaunchPlan, plan["id"]).goal = "Changed business goal"
+    with pytest.raises(GluonsError) as error:
+        service.record_provider_fact(owner, plan["id"], published.receipt_id)
+    assert error.value.code == "INSUFFICIENT_EVIDENCE"
+    assert published.receipt_id in launch.get_plan(owner, plan["id"])["state"]["published_product_receipts"]
+
+
+def test_plan_action_key_cannot_be_reserved_by_two_plans_concurrently(world, owner, monkeypatch):
+    from gluons import launch
+    connection_id = connected(world, owner, monkeypatch)
+    plans = [launch.create_plan(owner, goal=f"Launch {name}") for name in ("one", "two")]
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, connection_id).account_confirmed_at = utcnow()
+        for plan in plans:
+            session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+    def reserve(plan):
+        try:
+            return service._reserve_plan_action(owner, plan_id=plan["id"], action="shopify.product.publish",
+                automation_id="auto_fixture", connection_id=connection_id, idempotency_key="shared-launch-key",
+                payload={"product_id": "gid://shopify/Product/123", "publication_id": "gid://shopify/Publication/7", "expected_title": "Product"})
+        except GluonsError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(reserve, plans))
+    assert sum(result is None for result in results) == 1
+    assert all(result is None or result == "PLAN_ACTION_MISMATCH" or result.status == "retry" for result in results)
+    with tenant_tx(world.tenant_id) as session:
+        intents = session.scalars(select(LaunchEvidence).where(LaunchEvidence.kind == "provider_action_intent")).all()
+        assert len(intents) == 1 and intents[0].plan_id in {plan["id"] for plan in plans}
 
 
 def fulfillment_world(world, owner, monkeypatch, fault=None):
