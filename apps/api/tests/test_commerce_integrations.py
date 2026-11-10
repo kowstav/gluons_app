@@ -19,7 +19,7 @@ from gluons.commerce import service, shopify
 from gluons.config import get_settings
 from gluons.connectors.shopify import ProductDraft, ProductDraftConnector
 from gluons.core import GluonsError, new_id, utcnow
-from gluons.db.models import ActionReceipt, Automation, Connection, ConnectionSession, LaunchPlan, WebhookInbox
+from gluons.db.models import ActionReceipt, Automation, Connection, ConnectionSession, LaunchEvidence, LaunchPlan, WebhookInbox
 from gluons.db.session import tenant_tx
 from gluons.net import SideEffectBlocked, write_permit
 from helpers import World
@@ -212,12 +212,42 @@ def test_provider_payment_setup_is_not_kyc_or_live_checkout(world, owner, monkey
         connection.account_confirmed_at = utcnow()
         connection.granted_scopes = [*connection.granted_scopes, "read_shopify_payments_accounts"]
         session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+    mock_oauth(monkeypatch, scopes=["read_products", "write_products", "read_orders", "read_shopify_payments_accounts"])
     monkeypatch.setattr(shopify, "payment_status", lambda *args: {"setup_completed": True, "kyc_verified": False, "live_payments_verified": False})
     report = service.readiness(owner, plan["id"])
     assert report["payments"]["setup_completed"] is True
     assert report["payments"]["kyc_verified"] is False and report["store_live"] is False
+    monkeypatch.setattr(shopify, "order_status", lambda *args: {"is_test": True, "payment_confirmed": True})
+    observed = service.readiness(owner, plan["id"], order_id="gid://shopify/Order/123")
+    assert observed["test_order_payment_observed"] is True
+    assert observed["test_checkout_verified"] is False
+    assert observed["readiness"]["checks"]["test_checkout"]["status"] == "blocked"
     with pytest.raises(GluonsError):
         service.readiness(World.create().owner, plan["id"])
+
+
+def test_provider_observation_is_discarded_if_store_disconnects_during_read(world, owner, monkeypatch):
+    from gluons import launch
+    connection_id = connected(world, owner, monkeypatch)
+    plan = launch.create_plan(owner, goal="Owner-authorized shop")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, connection_id).account_confirmed_at = utcnow()
+        session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+    identity = shopify.identity
+
+    def disconnect_during_read(shop, token):
+        result = identity(shop, token)
+        with tenant_tx(world.tenant_id) as session:
+            connection = session.get(Connection, connection_id)
+            connection.status, connection.disconnected_at = "disconnected", utcnow()
+        return result
+
+    monkeypatch.setattr(shopify, "identity", disconnect_during_read)
+    with pytest.raises(GluonsError) as error:
+        service.readiness(owner, plan["id"])
+    assert error.value.code == "READINESS_CHANGED"
+    with tenant_tx(world.tenant_id) as session:
+        assert not session.scalars(select(LaunchEvidence).where(LaunchEvidence.plan_id == plan["id"])).all()
 
 
 def test_supplier_inquiry_cannot_send_without_precise_owner_approval(world, owner):
