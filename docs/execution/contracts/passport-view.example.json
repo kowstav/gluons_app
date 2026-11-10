@@ -1,0 +1,8 @@
+{
+  "organization_id": "org_example",
+  "schema_version": 1,
+  "version": 2,
+  "organization": {"name": "Example business", "country": "IN", "timezone": "UTC", "version": 1, "source": "organization_record", "passport_confirmation": "review_individual_fields"},
+  "fields": {"currency": {"value": "INR", "source": "owner", "confirmed_at": "2026-11-09T00:00:00+00:00", "confirmed_by": "usr_example", "schema_version": 1, "sensitivity": "business_profile"}},
+  "notice": "Profile facts do not authorize sharing or provider actions."
+}
