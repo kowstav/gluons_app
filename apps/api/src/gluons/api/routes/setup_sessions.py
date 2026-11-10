@@ -30,6 +30,11 @@ class RequestConnection(Version):
     capabilities: list[str] = Field(min_length=1, max_length=10)
 
 
+class ReuseConnection(Version):
+    connection_id: str = Field(min_length=1, max_length=40)
+    capabilities: list[str] = Field(min_length=1, max_length=10)
+
+
 class Redeem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     resume_token: str = Field(min_length=20, max_length=300)
@@ -66,6 +71,12 @@ def attach(setup_id: str, body: AttachConnection, principal: PrincipalDep) -> di
 def request_connection(setup_id: str, body: RequestConnection, principal: PrincipalDep, key: IdempotencyKey) -> dict:
     return setup_sessions.request_connection(principal, setup_id, provider=body.provider, capabilities=body.capabilities,
                                              expected_version=body.expected_version, idempotency_key=key)
+
+
+@router.post("/{setup_id}/connection/reuse")
+def reuse_connection(setup_id: str, body: ReuseConnection, principal: PrincipalDep) -> dict:
+    return setup_sessions.reuse_connection(principal, setup_id, connection_id=body.connection_id,
+                                           capabilities=body.capabilities, expected_version=body.expected_version)
 
 
 @router.post("/{setup_id}/resume-token")

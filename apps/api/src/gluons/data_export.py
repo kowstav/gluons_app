@@ -154,7 +154,8 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
                 record["passport_consents"] = [{k: v for k, v in consent.items() if k not in {"preview_hash", "values_hash"}}
                                                for consent in row["passport_consents"]]
             if dataset == "setup_sessions":
-                keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "created_by", "connection_session_id")
+                keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "created_by",
+                        "connection_session_id", "reused_connection_id", "reused_capabilities")
                 record["setup_sessions"] = [{key: item.get(key) for key in keys} for item in row["setup_sessions"].values()]
             record_bytes = len(canonical_json(record).encode())
             if record_bytes > MAX_RECORD_BYTES:

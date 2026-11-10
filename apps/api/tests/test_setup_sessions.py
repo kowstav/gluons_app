@@ -116,6 +116,95 @@ def test_next_action_follows_account_confirmation_and_health(world, owner):
     assert restarted["connection"]["id"] != session_id and restarted["version"] == 3
 
 
+def test_reuse_requires_confirmed_fresh_matching_account_and_degrades_on_revocation(world, owner):
+    setup = create(owner)
+    with tenant_tx(world.tenant_id, world.user_id) as session:
+        secret = vault.store(session, world.tenant_id, "gmail", {"access_token": "synthetic"})
+        account = Connection(id=new_id("con"), tenant_id=world.tenant_id, provider="gmail", environment="production",
+                             external_account_id="synthetic-subject", account_display="owner@example.com", created_by=world.user_id,
+                             credential_ref=secret, status="connected", granted_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+                             last_checked_at=utcnow(), metadata_json={"account_email": "owner@example.com"})
+        session.add(account)
+        account_id = account.id
+    args = {"connection_id": account_id, "capabilities": ["read_messages"], "expected_version": 1}
+    with pytest.raises(GluonsError):
+        setup_sessions.reuse_connection(owner, setup["id"], **args)
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, account_id).account_confirmed_at = utcnow()
+    ready = setup_sessions.reuse_connection(owner, setup["id"], **args)
+    assert ready["connection"]["kind"] == "existing_connection" and ready["next_actions"] == []
+    assert setup_sessions.reuse_connection(owner, setup["id"], **args) == ready
+    with tenant_tx(world.tenant_id) as session:
+        assert session.scalars(select(ConnectionSession)).all() == []
+    with pytest.raises(GluonsError):
+        setup_sessions.request_connection(owner, setup["id"], provider="gmail", capabilities=["read_messages"],
+                                          expected_version=2, idempotency_key="avoid-duplicate-setup")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, account_id).status = "disconnected"
+    assert setup_sessions.get(owner, setup["id"])["next_actions"][0]["code"] == "reconnect_account"
+    restarted = setup_sessions.request_connection(owner, setup["id"], provider="gmail", capabilities=["read_messages"],
+                                                   expected_version=2, idempotency_key="reconnect-selected-account")
+    assert restarted["connection"]["id"] != account_id
+
+
+@pytest.mark.parametrize("change", ["stale", "scope", "identity", "expired"])
+def test_reuse_rejects_unhealthy_or_insufficient_gmail(world, owner, change):
+    setup = create(owner)
+    with tenant_tx(world.tenant_id, world.user_id) as session:
+        secret = vault.store(session, world.tenant_id, "gmail", {"access_token": "synthetic"})
+        account = Connection(id=new_id("con"), tenant_id=world.tenant_id, provider="gmail", environment="production",
+                             external_account_id="synthetic-subject", account_display="owner@example.com", created_by=world.user_id,
+                             credential_ref=secret, status="connected", granted_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+                             account_confirmed_at=utcnow(), last_checked_at=utcnow(), metadata_json={"account_email": "owner@example.com"})
+        if change == "stale":
+            account.last_checked_at = utcnow() - timedelta(days=2)
+        elif change == "scope":
+            account.granted_scopes = []
+        elif change == "identity":
+            account.metadata_json = {"account_email": "different@example.com"}
+        else:
+            account.token_expires_at = utcnow() - timedelta(seconds=1)
+        session.add(account)
+        account_id = account.id
+    with pytest.raises(GluonsError):
+        setup_sessions.reuse_connection(owner, setup["id"], connection_id=account_id,
+                                        capabilities=["read_messages"], expected_version=1)
+
+
+def test_reuse_cannot_bind_another_business_account(world, owner):
+    setup = create(owner)
+    other_org = identity.create_organization(world.user_id, "Other business")
+    with tenant_tx(other_org, world.user_id) as session:
+        secret = vault.store(session, other_org, "gmail", {"access_token": "synthetic"})
+        account = Connection(id=new_id("con"), tenant_id=other_org, provider="gmail", environment="production",
+                             external_account_id="other-subject", account_display="other@example.com", created_by=world.user_id,
+                             credential_ref=secret, status="connected", granted_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+                             account_confirmed_at=utcnow(), last_checked_at=utcnow(), metadata_json={"account_email": "other@example.com"})
+        session.add(account)
+        account_id = account.id
+    with pytest.raises(GluonsError):
+        setup_sessions.reuse_connection(owner, setup["id"], connection_id=account_id,
+                                        capabilities=["read_messages"], expected_version=1)
+    assert setup_sessions.get(owner, setup["id"])["connection"] is None
+
+
+def test_reuse_can_request_new_handoff_when_more_scope_is_needed(world, owner):
+    setup = create(owner)
+    with tenant_tx(world.tenant_id, world.user_id) as session:
+        secret = vault.store(session, world.tenant_id, "gmail", {"access_token": "synthetic"})
+        account = Connection(id=new_id("con"), tenant_id=world.tenant_id, provider="gmail", environment="production",
+                             external_account_id="synthetic-subject", account_display="owner@example.com", created_by=world.user_id,
+                             credential_ref=secret, status="connected", granted_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+                             account_confirmed_at=utcnow(), last_checked_at=utcnow(), metadata_json={"account_email": "owner@example.com"})
+        session.add(account)
+        account_id = account.id
+    setup_sessions.reuse_connection(owner, setup["id"], connection_id=account_id,
+                                    capabilities=["read_messages"], expected_version=1)
+    handoff = setup_sessions.request_connection(owner, setup["id"], provider="gmail", capabilities=["send_messages"],
+                                                 expected_version=2, idempotency_key="upgrade-gmail-scopes")
+    assert "https://www.googleapis.com/auth/gmail.send" in handoff["connection"]["requested_scopes"]
+
+
 def test_resume_link_is_owner_authenticated_one_use_and_not_exported(world, owner):
     setup = create(owner)
     issued = setup_sessions.issue_resume_token(owner, setup["id"], 1)
@@ -161,6 +250,26 @@ def test_setup_http_requires_auth_csrf_and_hides_resume_secret(world):
         redeem = client.post(f"/v1/setup-sessions/{setup['id']}/redeem", json={"resume_token": token}, headers=headers)
         assert redeem.status_code == 200 and redeem.headers["cache-control"] == "no-store"
         assert client.post(f"/v1/setup-sessions/{setup['id']}/redeem", json={"resume_token": token}, headers=headers).status_code == 409
+
+
+def test_setup_http_reuses_the_selected_confirmed_account(world):
+    with tenant_tx(world.tenant_id, world.user_id) as session:
+        secret = vault.store(session, world.tenant_id, "gmail", {"access_token": "synthetic"})
+        account = Connection(id=new_id("con"), tenant_id=world.tenant_id, provider="gmail", environment="production",
+                             external_account_id="synthetic-subject", account_display="owner@example.com", created_by=world.user_id,
+                             credential_ref=secret, status="connected", granted_scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+                             account_confirmed_at=utcnow(), last_checked_at=utcnow(), metadata_json={"account_email": "owner@example.com"})
+        session.add(account)
+        account_id = account.id
+    with TestClient(create_app()) as client:
+        login = client.post("/v1/auth/login", json={"email": world.email, "password": PASSWORD})
+        headers = {"X-CSRF-Token": login.json()["csrf_token"], "Idempotency-Key": "reuse-http-key"}
+        assert client.post(f"/v1/organizations/{world.tenant_id}/select", headers=headers).status_code == 200
+        setup = client.post("/v1/setup-sessions", json={"intent": "business_launch"}, headers=headers).json()
+        response = client.post(f"/v1/setup-sessions/{setup['id']}/connection/reuse", headers=headers,
+                               json={"connection_id": account_id, "capabilities": ["read_messages"], "expected_version": 1})
+        assert response.status_code == 200 and response.json()["connection"]["account_display"] == "owner@example.com"
+        assert response.json()["next_actions"] == []
 
 
 def test_expired_link_can_be_replaced_and_purge_erases_setup(world, owner):

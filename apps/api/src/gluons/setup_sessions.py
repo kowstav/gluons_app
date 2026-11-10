@@ -34,6 +34,20 @@ def _required_scopes(connection: ConnectionSession) -> set[str]:
     return set(connection.requested_scopes)
 
 
+def _gmail_account_action(account: Connection | None, required_scopes: set[str]) -> str | None:
+    if (account is None or account.provider != "gmail" or not account.external_account_id
+            or account.status != "connected" or account.disconnected_at is not None or not account.credential_ref
+            or account.metadata_json.get("account_email") != account.account_display
+            or (account.token_expires_at is not None and account.token_expires_at <= utcnow())):
+        return "reconnect_account"
+    if account.account_confirmed_at is None:
+        return "confirm_account"
+    if (account.last_checked_at is None or account.last_checked_at < utcnow() - timedelta(hours=24)
+            or not required_scopes.issubset(set(account.granted_scopes))):
+        return "verify_account"
+    return None
+
+
 def _owner(principal: Principal) -> None:
     principal.require("org:manage")
     if principal.kind != "user" or principal.role != Role.OWNER or not principal.user_id or not principal.session_id:
@@ -112,7 +126,20 @@ def _connection(session, item: dict[str, Any], principal: Principal) -> Connecti
 def _render(session, item: dict[str, Any], principal: Principal) -> dict[str, Any]:
     connection = _connection(session, item, principal)
     account = session.get(Connection, connection.connection_id) if connection and connection.connection_id else None
-    return _view(item, connection, account)
+    result = _view(item, connection, account)
+    reused_id = item.get("reused_connection_id")
+    if connection is None and reused_id and result["status"] != "expired":
+        account = session.get(Connection, reused_id)
+        scopes = set(google.scopes_for(item["reused_capabilities"]))
+        required = {scope for scope in scopes if scope.startswith("https://www.googleapis.com/auth/gmail.")}
+        action = _gmail_account_action(account, required)
+        result["connection"] = {"kind": "existing_connection", "id": reused_id, "provider": "gmail",
+                                "account_display": account.account_display if account else None,
+                                "status": "ready" if action is None else "action_required", "owner_url": "/connections"}
+        labels = {"reconnect_account": "Reconnect the account", "confirm_account": "Review and confirm the connected account",
+                  "verify_account": "Verify the account and required access"}
+        result["next_actions"] = [] if action is None else [{"code": action, "label": labels[action], "owner_url": "/connections"}]
+    return result
 
 
 def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idempotency_key: str) -> dict[str, Any]:
@@ -135,7 +162,8 @@ def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idem
             raise not_found("Business launch plan")
         item = {"id": new_id("set"), "intent": intent, "launch_plan_id": launch_plan_id, "status": "in_progress",
                 "version": 1, "created_at": utcnow().isoformat(), "expires_at": (utcnow() + timedelta(days=30)).isoformat(), "created_by": principal.user_id,
-                "connection_session_id": None, "idempotency_hash": key_hash, "request_hash": request_hash,
+                "connection_session_id": None, "reused_connection_id": None, "reused_capabilities": [],
+                "idempotency_hash": key_hash, "request_hash": request_hash,
                 "link_hash": None, "link_expires_at": None}
         records[item["id"]] = item
         org.setup_sessions = records
@@ -192,9 +220,9 @@ def attach_connection(principal: Principal, setup_id: str, connection_session_id
         if (connection is None or connection.initiated_by != principal.user_id
                 or (item["launch_plan_id"] and connection.automation_plan_id != item["launch_plan_id"])):
             raise not_found("Connection session")
-        if item["connection_session_id"] not in (None, connection.id):
+        if item.get("reused_connection_id") or item["connection_session_id"] not in (None, connection.id):
             raise conflict("This setup already references a different connection session.")
-        item["connection_session_id"] = connection.id
+        item.update(connection_session_id=connection.id, reused_connection_id=None, reused_capabilities=[])
         item["version"] += 1
         records = deepcopy(org.setup_sessions)
         records[setup_id] = item
@@ -204,12 +232,42 @@ def attach_connection(principal: Principal, setup_id: str, connection_session_id
         return _render(session, item, principal)
 
 
+def reuse_connection(principal: Principal, setup_id: str, *, connection_id: str, capabilities: list[str],
+                     expected_version: int) -> dict[str, Any]:
+    """Bind only an owner-selected, confirmed and recently verified Gmail account."""
+    _owner(principal)
+    scopes = set(google.scopes_for(capabilities))
+    required = {scope for scope in scopes if scope.startswith("https://www.googleapis.com/auth/gmail.")}
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = _org(session, principal, lock=True)
+        item = _item(org, setup_id, principal, active=True)
+        if (item.get("reused_connection_id") == connection_id
+                and item.get("reused_capabilities") == sorted(set(capabilities))):
+            return _render(session, item, principal)
+        if item["version"] != expected_version:
+            raise conflict_version(item["version"])
+        if item.get("connection_session_id") or item.get("reused_connection_id"):
+            raise conflict("This setup already references an account or connection handoff.")
+        account = session.get(Connection, connection_id, with_for_update=True)
+        if _gmail_account_action(account, required) is not None:
+            raise conflict("Select a confirmed Gmail account with current health and the required access.")
+        item.update(reused_connection_id=account.id, reused_capabilities=sorted(set(capabilities)), version=item["version"] + 1)
+        records = deepcopy(org.setup_sessions)
+        records[setup_id] = item
+        org.setup_sessions = records
+        audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.connection_reused",
+                     actor=principal, resource_type="setup_session", resource_id=setup_id,
+                     data={"provider": "gmail", "capabilities": sorted(set(capabilities))})
+        return _render(session, item, principal)
+
+
 def request_connection(principal: Principal, setup_id: str, *, provider: str, capabilities: list[str],
                        expected_version: int, idempotency_key: str) -> dict[str, Any]:
     _owner(principal)
     if provider != "gmail" or not 8 <= len(idempotency_key) <= 200:
         raise validation_failed("Choose the supported Gmail handoff and a valid idempotency key.")
-    google.scopes_for(capabilities)
+    requested_scopes = set(google.scopes_for(capabilities))
+    requested_gmail_scopes = {scope for scope in requested_scopes if scope.startswith("https://www.googleapis.com/auth/gmail.")}
     request_hash = fingerprint({"provider": provider, "capabilities": sorted(capabilities)})
     key_hash = fingerprint({"owner": principal.user_id, "key": idempotency_key})
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
@@ -222,6 +280,10 @@ def request_connection(principal: Principal, setup_id: str, *, provider: str, ca
             return _render(session, item, principal)
         if item["version"] != expected_version:
             raise conflict_version(item["version"])
+        if item.get("reused_connection_id"):
+            account = session.get(Connection, item["reused_connection_id"])
+            if _gmail_account_action(account, requested_gmail_scopes) is None:
+                raise conflict("Continue with the confirmed account already selected for this setup.")
         if existing is not None and existing.status not in {"cancelled", "failed"} and existing.expires_at > utcnow():
             account = session.get(Connection, existing.connection_id) if existing.connection_id else None
             if (existing.status != "authorized" or (account is not None and account.provider == existing.provider
@@ -229,12 +291,12 @@ def request_connection(principal: Principal, setup_id: str, *, provider: str, ca
                     and account.disconnected_at is None and account.credential_ref
                     and (account.token_expires_at is None or account.token_expires_at > utcnow())
                     and (account.provider != "gmail" or account.metadata_json.get("account_email") == account.account_display)
-                    and _required_scopes(existing).issubset(set(account.granted_scopes)))):
+                    and requested_gmail_scopes.issubset(set(account.granted_scopes)))):
                 raise conflict("Continue the existing connection handoff before starting another.")
         created = connection_service.begin_session_in_transaction(session, principal, provider, capabilities=capabilities,
                                                                   automation_plan_id=item["launch_plan_id"])
         connection = session.get(ConnectionSession, created["session_id"])
-        item.update(connection_session_id=connection.id, connection_key_hash=key_hash,
+        item.update(connection_session_id=connection.id, reused_connection_id=None, reused_capabilities=[], connection_key_hash=key_hash,
                     connection_request_hash=request_hash, version=item["version"] + 1)
         records = deepcopy(org.setup_sessions)
         records[setup_id] = item
