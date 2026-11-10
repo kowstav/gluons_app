@@ -243,6 +243,9 @@ def readiness(principal: Principal, plan_id: str, *, order_id: str | None = None
                    tuple(sorted(connection.granted_scopes)), connection.metadata_json.get("shop"))
         if current != snapshot or plan.state.get("store_connection_id") != connection.id:
             raise GluonsError("READINESS_CHANGED", "The plan or store changed during the check. Refresh and try again.", status=409)
+        detail.update({"connection_id": connection.id, "plan_version": plan.version,
+                       "plan_store_context": readiness_projection.plan_action_context(plan, connection),
+                       "observed_scopes": sorted(granted)})
         session.add(LaunchEvidence(id=new_id("lev"), tenant_id=principal.tenant_id, plan_id=plan.id, stage=plan.stage,
                                    kind="provider_readiness", is_test=connection.environment != "production", source="shopify", detail=detail))
         return {"plan_id": plan.id, "store_connected": True, **detail, "readiness": readiness_projection.project(session, plan)}

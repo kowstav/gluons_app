@@ -221,6 +221,8 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await expect(page.getByRole("heading", { name: "Launch readiness", exact: true })).toBeVisible();
   await expect(page.getByText("Current status: blocked. A connected store alone does not verify a launch.", { exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Obtain current payment-provider eligibility and owner KYC status." })).toBeVisible();
+  await page.getByRole("button", { name: "Check provider readiness", exact: true }).click();
+  await expect(page.getByText("Current status: blocked. A connected store alone does not verify a launch.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Request planning approval", exact: true }).click();
   await navigate(page, "Approval inbox");
   await expect(page.getByRole("heading", { name: "Approve this business launch planning brief", exact: true })).toBeVisible();
