@@ -4,9 +4,10 @@ export class ApiError extends Error {
   constructor(public code: string, message: string, public status: number) { super(message); }
 }
 
-export async function api<T = Record<string, unknown>>(path: string, options: { method?: string; body?: unknown; idempotent?: boolean; idempotencyKey?: string } = {}): Promise<T> {
+export async function api<T = Record<string, unknown>>(path: string, options: { method?: string; body?: unknown; idempotent?: boolean; idempotencyKey?: string; expectedOrganization?: string } = {}): Promise<T> {
   const method = options.method || "GET";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (options.expectedOrganization) headers["X-Expected-Organization"] = options.expectedOrganization;
   if (method !== "GET") {
     const csrf = document.cookie.split("; ").find(c => c.startsWith("gluons_csrf="))?.slice("gluons_csrf=".length);
     if (csrf) headers["X-CSRF-Token"] = decodeURIComponent(csrf);

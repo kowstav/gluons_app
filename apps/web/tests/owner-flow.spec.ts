@@ -126,6 +126,10 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await expect(page.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toBeVisible();
   await expect(page.getByLabel("Choose saved setup").locator("option")).toHaveCount(2);
 
+  const previousBusinessTab = await page.context().newPage();
+  await previousBusinessTab.goto("/business-setup");
+  await expect(previousBusinessTab.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toBeVisible();
+
   if (await menu.isVisible()) await menu.click();
   await page.locator(".workspace-selector").click();
   await expect(page.getByRole("heading", { name: "Choose your business.", exact: true })).toBeVisible();
@@ -136,6 +140,12 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await navigate(page, "Business setup");
   await expect(page.getByText(`Second Business ${id}`, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toHaveCount(0);
+  await expect(page.getByLabel("Choose saved setup")).toHaveCount(0);
+  await previousBusinessTab.getByRole("button", { name: "Start a new setup", exact: true }).click();
+  await expect(previousBusinessTab.locator(".setup-room [role=alert]")).toContainText("Your active business changed in another tab");
+  await previousBusinessTab.close();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Start a new setup", exact: true })).toBeVisible();
   await expect(page.getByLabel("Choose saved setup")).toHaveCount(0);
   if (await menu.isVisible()) await menu.click();
   await page.locator(".workspace-selector").click();
