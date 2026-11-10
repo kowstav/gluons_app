@@ -187,6 +187,23 @@ def list_sessions(principal: Principal) -> list[dict[str, Any]]:
         return [_render(session, item, principal) for item in sorted(records, key=lambda row: row["created_at"], reverse=True)]
 
 
+def record_ui_measurement(principal: Principal, setup_id: str, *, kind: str, seconds: int | None = None) -> dict[str, str]:
+    """Record bounded, client-estimated interaction metrics without field values."""
+    _owner(principal)
+    if ((kind == "active_seconds" and (type(seconds) is not int or not 1 <= seconds <= 300))
+            or (kind == "help_opened" and seconds is not None)
+            or kind not in {"active_seconds", "help_opened"}):
+        raise validation_failed("Choose a supported setup measurement.")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        _item(_org(session, principal), setup_id, principal, active=True)
+        detail: dict[str, Any] = {"basis": "client_estimated"}
+        if seconds is not None:
+            detail["seconds"] = seconds
+        audit.record(session, tenant_id=principal.tenant_id, category="setup_measurement", event_type=f"setup.{kind}",
+                     actor=principal, resource_type="setup_session", resource_id=setup_id, data=detail)
+    return {"status": "recorded", "basis": "client_estimated"}
+
+
 def remove_expired(principal: Principal, setup_id: str, expected_version: int) -> dict[str, Any]:
     """Remove expired setup progress without disconnecting a provider account."""
     _owner(principal)

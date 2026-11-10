@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gluons import passport, passport_previews
 from gluons.api.deps import PrincipalDep
-from gluons.passport import PassportFields
+from gluons.passport import OrganizationFields, PassportFields
 
 router = APIRouter(prefix="/v1/business-passport", tags=["business-passport"])
 
@@ -27,6 +27,12 @@ class ConfirmOrganizationFields(BaseModel):
     fields: list[Literal["business_name", "country", "timezone"]] = Field(min_length=1, max_length=3)
     expected_version: int = Field(ge=1)
     expected_organization_version: int = Field(ge=1)
+
+
+class UpdateOrganizationFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_organization_version: int = Field(ge=1)
+    fields: OrganizationFields
 
 
 class SharePreview(BaseModel):
@@ -55,6 +61,12 @@ def update_passport(body: UpdatePassport, principal: PrincipalDep) -> dict:
 @router.post("/organization-fields/confirm")
 def confirm_organization_fields(body: ConfirmOrganizationFields, principal: PrincipalDep) -> dict:
     return passport.confirm_organization_fields(principal, body.fields, body.expected_version, body.expected_organization_version)
+
+
+@router.patch("/organization-fields")
+def update_organization_fields(body: UpdateOrganizationFields, principal: PrincipalDep) -> dict:
+    return passport.update_organization_fields(principal, body.expected_organization_version,
+                                               body.fields.model_dump(exclude_unset=True, mode="json"))
 
 
 @router.post("/imports/preview")

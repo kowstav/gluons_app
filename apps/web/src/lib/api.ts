@@ -4,13 +4,13 @@ export class ApiError extends Error {
   constructor(public code: string, message: string, public status: number) { super(message); }
 }
 
-export async function api<T = Record<string, unknown>>(path: string, options: { method?: string; body?: unknown; idempotent?: boolean } = {}): Promise<T> {
+export async function api<T = Record<string, unknown>>(path: string, options: { method?: string; body?: unknown; idempotent?: boolean; idempotencyKey?: string } = {}): Promise<T> {
   const method = options.method || "GET";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (method !== "GET") {
     const csrf = document.cookie.split("; ").find(c => c.startsWith("gluons_csrf="))?.slice("gluons_csrf=".length);
     if (csrf) headers["X-CSRF-Token"] = decodeURIComponent(csrf);
-    if (options.idempotent) headers["Idempotency-Key"] = crypto.randomUUID();
+    if (options.idempotent || options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey || crypto.randomUUID();
   }
   let response: Response;
   try { response = await fetch(`${API_URL}${path}`, { method, headers, credentials: "include", cache: "no-store", body: options.body === undefined ? undefined : JSON.stringify(options.body) }); }

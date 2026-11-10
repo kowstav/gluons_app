@@ -40,6 +40,12 @@ class Redeem(BaseModel):
     resume_token: str = Field(min_length=20, max_length=300)
 
 
+class SetupMeasurement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["active_seconds", "help_opened"]
+    seconds: int | None = Field(default=None, ge=1, le=300, strict=True)
+
+
 @router.post("", status_code=201)
 def start(body: StartSetup, principal: PrincipalDep, key: IdempotencyKey) -> dict:
     return setup_sessions.start(principal, intent=body.intent, launch_plan_id=body.launch_plan_id, idempotency_key=key)
@@ -55,6 +61,11 @@ def list_sessions(principal: PrincipalDep, response: Response) -> dict:
 def get(setup_id: str, principal: PrincipalDep, response: Response) -> dict:
     response.headers["Cache-Control"] = "no-store"
     return setup_sessions.get(principal, setup_id)
+
+
+@router.post("/{setup_id}/measurements")
+def measurement(setup_id: str, body: SetupMeasurement, principal: PrincipalDep) -> dict:
+    return setup_sessions.record_ui_measurement(principal, setup_id, kind=body.kind, seconds=body.seconds)
 
 
 @router.post("/{setup_id}/remove-expired")
