@@ -86,6 +86,32 @@ def test_invalid_organization_timezone_and_country_are_not_confirmed(world, owne
     assert passport.get(owner)["fields"] == {}
 
 
+def test_organization_corrections_are_versioned_and_do_not_reconfirm(world, owner):
+    original = passport.get(owner)
+    version = original["organization"]["version"]
+    confirmed = passport.confirm_organization_fields(owner, ["business_name", "timezone"], 1, version)
+    assert confirmed["fields"]["business_name"]["status"] == "confirmed"
+    changed = passport.update_organization_fields(owner, version, {"name": "New business name", "timezone": "Asia/Kolkata"})
+    assert changed["organization"]["name"] == "New business name"
+    assert changed["organization"]["version"] == version + 1
+    assert changed["fields"]["business_name"]["status"] == "stale"
+    assert changed["fields"]["timezone"]["status"] == "stale"
+    with pytest.raises(GluonsError) as exc:
+        passport.update_organization_fields(owner, version, {"name": "Stale overwrite"})
+    assert exc.value.status == 409
+    with tenant_tx(world.tenant_id) as session:
+        assert session.get(Organization, world.tenant_id).name == "New business name"
+
+
+@pytest.mark.parametrize("fields", [{"name": None}, {"timezone": "Invalid/Zone"}, {"country": "us"},
+                                    {"name": "password=example"}, {"legal_identifier": "not-allowed"}])
+def test_organization_corrections_reject_invalid_or_sensitive_values(owner, fields):
+    version = passport.get(owner)["organization"]["version"]
+    with pytest.raises(GluonsError) as exc:
+        passport.update_organization_fields(owner, version, fields)
+    assert exc.value.status == 422
+
+
 def test_concurrent_edits_cannot_overwrite_one_another(owner):
     def edit(name):
         try:
@@ -143,6 +169,10 @@ def test_authenticated_api_rejects_extra_fields_and_stale_versions(world):
                                      "expected_organization_version": current["organization"]["version"]})
         assert response.status_code == 200
         assert response.json()["fields"]["business_name"]["value"] == current["organization"]["name"]
+        update = client.patch("/v1/business-passport/organization-fields", headers=headers,
+                              json={"expected_organization_version": current["organization"]["version"],
+                                    "fields": {"country": "US"}})
+        assert update.status_code == 200 and update.json()["organization"]["country"] == "US"
 
 
 @pytest.mark.parametrize("fields", [

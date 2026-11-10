@@ -45,6 +45,27 @@ class PassportFields(BaseModel):
         return self
 
 
+class OrganizationFields(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    country: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_values(self) -> OrganizationFields:
+        if any(name in self.model_fields_set and getattr(self, name) is None for name in ("name", "timezone")):
+            raise ValueError("Business name and time zone cannot be empty.")
+        if any(isinstance(value, str) and SENSITIVE_MARKERS.search(value) for value in self.model_dump(exclude_unset=True).values()):
+            raise ValueError("Credentials and sensitive identifiers do not belong in these fields.")
+        if self.timezone is not None:
+            try:
+                ZoneInfo(self.timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError("Choose a valid IANA time zone.") from None
+        return self
+
+
 def field_metadata(name: str) -> dict[str, Any]:
     return {"schema_version": 1, "sensitivity": "business_contact" if name in {"support_email", "operational_address"} else "business_profile"}
 
@@ -116,6 +137,29 @@ def update(principal: Principal, expected_version: int, changes: dict[str, Any])
             audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="passport.updated",
                          actor=principal, resource_type="organization", resource_id=principal.tenant_id,
                          data={"fields": sorted(changes), "passport_version": org.passport_version})
+        return _view(org)
+
+
+def update_organization_fields(principal: Principal, expected_version: int, changes: dict[str, Any]) -> dict[str, Any]:
+    """Update canonical organization values without silently reconfirming them."""
+    _owner(principal)
+    try:
+        changes = OrganizationFields.model_validate(changes).model_dump(exclude_unset=True, mode="json")
+    except ValidationError:
+        raise validation_failed("Use a valid business name, country code and time zone.") from None
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = session.get(Organization, principal.tenant_id, with_for_update=True)
+        if org is None:
+            raise not_found("Organization")
+        if org.version != expected_version:
+            raise conflict_version(org.version)
+        if changes:
+            for name, value in changes.items():
+                setattr(org, name, value)
+            org.version += 1
+            audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="passport.organization_updated",
+                         actor=principal, resource_type="organization", resource_id=principal.tenant_id,
+                         data={"fields": sorted(changes), "organization_version": org.version})
         return _view(org)
 
 

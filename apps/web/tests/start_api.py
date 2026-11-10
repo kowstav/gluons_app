@@ -23,6 +23,8 @@ def main() -> None:
         "GLUONS_PUBLIC_API_URL": "http://localhost:8001",
         "GLUONS_PUBLIC_WEB_URL": "http://localhost:3001",
         "GLUONS_ALLOWED_WEB_ORIGINS": "http://localhost:3001",
+        "GLUONS_GOOGLE_CLIENT_ID": "",
+        "GLUONS_GOOGLE_CLIENT_SECRET": "",
     })
     devdb.migrate(db)
     from gluons.config import get_settings
