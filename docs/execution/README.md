@@ -17,7 +17,9 @@ Publication is complete in [kowstav/gluons_app](https://github.com/kowstav/gluon
 7. [Founder actions and measurement](07_FOUNDER_ACTIONS_AND_MEASUREMENT.md): external prerequisites, economics, pilot and business decisions.
 8. [Provider source checks](08_PROVIDER_SOURCE_CHECKS.md): primary references, checked facts and unresolved assumptions.
 
-EX-01 preparation: [Gmail provider-proof notes](EX01_PROVIDER_PROOF.md). The isolated gateway-backed self-test and read-only collector are implemented on [draft PR #2](https://github.com/kowstav/gluons_app/pull/2), with provider-double tests and CI passing. Review and integration are pending; no real Gmail send or provider evidence has been obtained.
+EX-01 preparation: [Gmail provider-proof notes](EX01_PROVIDER_PROOF.md). The isolated gateway-backed self-test and read-only collector were prepared in [PR #2](https://github.com/kowstav/gluons_app/pull/2), with provider-double tests and CI evidence. Consult that PR for its integration status; no real Gmail send or provider evidence has been obtained.
+
+November 10 implementation update: [PR #3](https://github.com/kowstav/gluons_app/pull/3) merged the Passport and setup API; [PR #4](https://github.com/kowstav/gluons_app/pull/4) merged the owner setup room and cross-tab business-context rejection. PRs [#5](https://github.com/kowstav/gluons_app/pull/5), [#6](https://github.com/kowstav/gluons_app/pull/6), [#7](https://github.com/kowstav/gluons_app/pull/7) and [#8](https://github.com/kowstav/gluons_app/pull/8) added the initial shared readiness projection, plan-bound receipt handling and bounded observations. See [EX-07](EX07_OWNER_SETUP.md) and [EX-08](EX08_READINESS.md) for scope and remaining gates. These changes do not establish live Gmail OAuth, a real order workflow or production commerce readiness.
 
 ## Give an agent one brief
 

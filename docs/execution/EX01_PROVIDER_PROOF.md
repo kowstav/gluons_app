@@ -1,6 +1,6 @@
 # EX-01 provider proof preparation
 
-This is an opt-in preparation path. A collector result is not permission to perform a write. EX-00 was merged into main on November 9; this work remains on the separate EX-01 branch. The actual participating business, inbound channel, and system of record remain founder decisions.
+This is an opt-in preparation path. A collector result is not permission to perform a write. EX-00 was merged into main on November 9. The actual participating business, inbound channel, and system of record remain founder decisions.
 
 ## Before any external action
 

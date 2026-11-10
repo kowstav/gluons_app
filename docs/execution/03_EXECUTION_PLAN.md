@@ -42,7 +42,7 @@ Baseline host authorization can use the existing email/MFA flow; Google sign-in 
 
 ## Work packages
 
-November 9 update: EX-00 security remediation was merged into main after passing CI; the local isolated Compose smoke is recorded in the [verification ledger](06_VERIFICATION_AND_RELEASE.md). EX-01's isolated Gmail harness is in draft PR #2, with provider-double and CI evidence, pending integration. A real Gmail proof, hosted deployment and the remaining release-gate scenarios are not established by these results.
+November 9 update: EX-00 security remediation was merged into main after passing CI; the local isolated Compose smoke is recorded in the [verification ledger](06_VERIFICATION_AND_RELEASE.md). EX-01's isolated Gmail harness was prepared in PR #2 with provider-double and CI evidence; consult that PR for its integration status. A real Gmail proof, hosted deployment and the remaining release-gate scenarios are not established by these results.
 
 Effort ranges below are planning estimates in focused engineer-days, not completion promises. They assume a developer familiar with the code and exclude provider review, owner decisions and cloud provisioning wait. Re-estimate after G0 and the first provider run. A solo founder should execute the same dependencies sequentially.
 
