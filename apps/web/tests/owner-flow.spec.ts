@@ -224,8 +224,18 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await navigate(page, "Business launch");
   await page.getByLabel("Business goal", { exact: true }).fill("Open a synthetic craft shop for browser testing");
   await page.getByLabel("Business country", { exact: true }).fill("IN");
+  // Synthetic response exercises the environment label; it is not provider evidence.
+  await page.route("**/v1/business-launch/plans", async route => {
+    if (route.request().method() !== "POST") { await route.continue(); return; }
+    const response = await route.fetch();
+    const body = await response.json();
+    body.readiness.checks.publication.recent_individual_receipts = [{ environment: "sandbox" }];
+    await route.fulfill({ response, json: body });
+  });
   await page.getByRole("button", { name: "Create launch plan", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plan progress", exact: true })).toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: "1 recent individual provider readback: 1 in sandbox" })).toBeVisible();
+  await page.unroute("**/v1/business-launch/plans");
   await expect(page.getByRole("heading", { name: "Launch readiness", exact: true })).toBeVisible();
   await expect(page.getByText("Current status: blocked. A connected store alone does not verify a launch.", { exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Obtain current payment-provider eligibility and owner KYC status." })).toBeVisible();
