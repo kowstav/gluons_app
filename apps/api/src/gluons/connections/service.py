@@ -56,6 +56,12 @@ def _connection(row: Connection) -> dict[str, Any]:
 
 
 def begin_session(principal: Principal, provider: str, *, capabilities: list[str], automation_plan_id: str | None = None) -> dict:
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        return begin_session_in_transaction(session, principal, provider, capabilities=capabilities, automation_plan_id=automation_plan_id)
+
+
+def begin_session_in_transaction(session: Any, principal: Principal, provider: str, *, capabilities: list[str], automation_plan_id: str | None = None) -> dict:
+    """Create a connection handoff inside the caller's tenant transaction."""
     principal.require("connections:manage")
     if provider == "whatsapp" or provider == "whatsapp_personal":
         raise GluonsError("PERSONAL_WHATSAPP_UNSUPPORTED", "Use the official WhatsApp Business Platform onboarding.", status=422)
@@ -63,22 +69,21 @@ def begin_session(principal: Principal, provider: str, *, capabilities: list[str
         raise GluonsError("PROVIDER_UNSUPPORTED", "This provider is not available.", status=422)
     scopes = google.scopes_for(capabilities) if provider == "gmail" else []
     configured = provider == "gmail" and google.configured()
-    with tenant_tx(principal.tenant_id, principal.user_id) as session:
-        if automation_plan_id and session.get(Plan, automation_plan_id) is None and session.get(LaunchPlan, automation_plan_id) is None:
-            raise not_found("Automation plan")
-        row = ConnectionSession(
-            id=new_id("cns"), tenant_id=principal.tenant_id, initiated_by=principal.actor_id,
-            initiated_via=principal.via, binding_id=principal.binding_id, provider=provider,
-            requested_capabilities=capabilities, requested_scopes=scopes,
-            automation_plan_id=automation_plan_id, setup_handle_hash=token_hash(new_secret_token()),
-            status="requires_external_authorization" if configured else "needs_configuration",
-            expires_at=utcnow() + timedelta(seconds=get_settings().connection_session_ttl_seconds),
-        )
-        session.add(row)
-        session.flush()
-        audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="connection.session_created",
-                     actor=principal, resource_type="connection_session", resource_id=row.id, data={"provider": provider, "scopes": scopes})
-        return _session(row)
+    if automation_plan_id and session.get(Plan, automation_plan_id) is None and session.get(LaunchPlan, automation_plan_id) is None:
+        raise not_found("Automation plan")
+    row = ConnectionSession(
+        id=new_id("cns"), tenant_id=principal.tenant_id, initiated_by=principal.actor_id,
+        initiated_via=principal.via, binding_id=principal.binding_id, provider=provider,
+        requested_capabilities=capabilities, requested_scopes=scopes,
+        automation_plan_id=automation_plan_id, setup_handle_hash=token_hash(new_secret_token()),
+        status="requires_external_authorization" if configured else "needs_configuration",
+        expires_at=utcnow() + timedelta(seconds=get_settings().connection_session_ttl_seconds),
+    )
+    session.add(row)
+    session.flush()
+    audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="connection.session_created",
+                 actor=principal, resource_type="connection_session", resource_id=row.id, data={"provider": provider, "scopes": scopes})
+    return _session(row)
 
 
 def session_status(principal: Principal, session_id: str) -> dict:

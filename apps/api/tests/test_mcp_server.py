@@ -108,6 +108,8 @@ def test_commerce_mcp_plan_is_persistent_and_requires_owner_handoffs(remote):
     assert plan["stage"] == "INTENT_CAPTURED" and plan["payment_status"] == "unverified" and plan["store_live"] is False
     result = data(call(remote, "get_business_launch_plan", {"plan_id": plan["id"]}))
     assert result["plan"]["id"] == plan["id"]
+    assert result["plan"]["readiness"] == result["evidence"]["readiness"]
+    assert result["plan"]["readiness"]["status"] == "blocked"
     cancelled = data(call(remote, "cancel_business_launch_plan", {"plan_id": plan["id"], "expected_version": plan["version"],
                                                                  "idempotency_key": "mcp-cancel-commerce"}))
     assert cancelled["branch_status"] == "CANCELLED"

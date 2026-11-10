@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
@@ -19,7 +20,7 @@ from gluons.commerce import service, shopify
 from gluons.config import get_settings
 from gluons.connectors.shopify import ProductDraft, ProductDraftConnector
 from gluons.core import GluonsError, new_id, utcnow
-from gluons.db.models import ActionReceipt, Automation, Connection, ConnectionSession, LaunchPlan, WebhookInbox
+from gluons.db.models import ActionReceipt, Automation, Connection, ConnectionSession, LaunchEvidence, LaunchPlan, WebhookInbox
 from gluons.db.session import tenant_tx
 from gluons.net import SideEffectBlocked, write_permit
 from helpers import World
@@ -209,15 +210,68 @@ def test_provider_payment_setup_is_not_kyc_or_live_checkout(world, owner, monkey
     plan = launch.create_plan(owner, goal="Owner-authorized shop")
     with tenant_tx(world.tenant_id) as session:
         connection = session.get(Connection, connection_id)
-        connection.account_confirmed_at = utcnow()
+        connection.account_confirmed_at = utcnow() - timedelta(seconds=1)
         connection.granted_scopes = [*connection.granted_scopes, "read_shopify_payments_accounts"]
         session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
-    monkeypatch.setattr(shopify, "payment_status", lambda *args: {"setup_completed": True, "kyc_verified": False, "live_payments_verified": False})
+        session.add(LaunchEvidence(id=new_id("lev"), tenant_id=world.tenant_id, plan_id=plan["id"], stage="STORE_CONNECTED",
+            kind="store_connection", source="shopify", is_test=True, detail={"connection_id": connection_id, "environment": "sandbox"}))
+    mock_oauth(monkeypatch, scopes=["read_products", "write_products", "read_orders", "read_shopify_payments_accounts"])
+    monkeypatch.setattr(shopify, "payment_status", lambda *args: {"status": "setup_completed", "setup_completed": True, "kyc_verified": False, "live_payments_verified": False})
     report = service.readiness(owner, plan["id"])
     assert report["payments"]["setup_completed"] is True
     assert report["payments"]["kyc_verified"] is False and report["store_live"] is False
+    observed_payment = report["readiness"]["checks"]["payment_eligibility"]["provider_observation"]
+    assert observed_payment["provider_status"] == "setup_completed" and observed_payment["environment"] == "sandbox"
+    assert not observed_payment["kyc_verified"] and not observed_payment["live_payments_verified"]
+    assert report["readiness"]["checks"]["payment_eligibility"]["status"] == "blocked"
+    with tenant_tx(world.tenant_id) as session:
+        connection = session.get(Connection, connection_id)
+        connection.granted_scopes = [scope for scope in connection.granted_scopes if scope != "read_shopify_payments_accounts"]
+    assert "provider_observation" not in launch.get_plan(owner, plan["id"])["readiness"]["checks"]["payment_eligibility"]
+    with tenant_tx(world.tenant_id) as session:
+        connection = session.get(Connection, connection_id)
+        connection.granted_scopes = [*connection.granted_scopes, "read_shopify_payments_accounts"]
+    with tenant_tx(world.tenant_id) as session:
+        session.get(LaunchPlan, plan["id"]).version += 1
+    assert "provider_observation" not in launch.get_plan(owner, plan["id"])["readiness"]["checks"]["payment_eligibility"]
+    monkeypatch.setattr(shopify, "order_status", lambda *args: {"is_test": True, "payment_confirmed": True})
+    observed = service.readiness(owner, plan["id"], order_id="gid://shopify/Order/123")
+    assert observed["test_order_payment_observed"] is True
+    assert observed["test_checkout_verified"] is False
+    assert observed["readiness"]["checks"]["test_checkout"]["status"] == "blocked"
+    monkeypatch.setattr(shopify, "payment_status", lambda *args: {"status": "unavailable", "setup_completed": False, "kyc_verified": False, "live_payments_verified": False})
+    unavailable = service.readiness(owner, plan["id"])
+    assert "provider_observation" not in unavailable["readiness"]["checks"]["payment_eligibility"]
+    mock_oauth(monkeypatch, scopes=["read_products", "write_products", "read_orders"])
+    missing_scope = service.readiness(owner, plan["id"])
+    assert missing_scope["payments"]["status"] == "permission_required"
+    assert "provider_observation" not in missing_scope["readiness"]["checks"]["payment_eligibility"]
     with pytest.raises(GluonsError):
         service.readiness(World.create().owner, plan["id"])
+
+
+def test_provider_observation_is_discarded_if_store_disconnects_during_read(world, owner, monkeypatch):
+    from gluons import launch
+    connection_id = connected(world, owner, monkeypatch)
+    plan = launch.create_plan(owner, goal="Owner-authorized shop")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, connection_id).account_confirmed_at = utcnow()
+        session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+    identity = shopify.identity
+
+    def disconnect_during_read(shop, token):
+        result = identity(shop, token)
+        with tenant_tx(world.tenant_id) as session:
+            connection = session.get(Connection, connection_id)
+            connection.status, connection.disconnected_at = "disconnected", utcnow()
+        return result
+
+    monkeypatch.setattr(shopify, "identity", disconnect_during_read)
+    with pytest.raises(GluonsError) as error:
+        service.readiness(owner, plan["id"])
+    assert error.value.code == "READINESS_CHANGED"
+    with tenant_tx(world.tenant_id) as session:
+        assert not session.scalars(select(LaunchEvidence).where(LaunchEvidence.plan_id == plan["id"])).all()
 
 
 def test_supplier_inquiry_cannot_send_without_precise_owner_approval(world, owner):
@@ -323,9 +377,11 @@ def test_publication_is_precisely_owner_approved_and_verified_once(world, owner,
         row = session.get(Automation, automation["id"])
         row.mode, row.status = "live", "active"
         connection = session.get(Connection, connection_id)
-        connection.account_confirmed_at = utcnow()
+        connection.account_confirmed_at = utcnow() - timedelta(seconds=1)
         connection.granted_scopes = ["read_products", "read_publications", "write_publications"]
         session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+        session.add(LaunchEvidence(id=new_id("lev"), tenant_id=world.tenant_id, plan_id=plan["id"], stage="STORE_CONNECTED",
+            kind="store_connection", source="shopify", is_test=True, detail={"connection_id": connection_id, "environment": "sandbox"}))
         proposed = policy.propose(session, owner, row.id, {"mode": "live", "allowed_actions": ["shopify.product.publish"], "connection_ids": [connection_id]})
         policy.sign(session, owner, proposed.id)
     arguments = {"action": "shopify.product.publish", "automation_id": automation["id"], "connection_id": connection_id, "plan_id": plan["id"],
@@ -334,13 +390,83 @@ def test_publication_is_precisely_owner_approved_and_verified_once(world, owner,
     assert waiting.status == "waiting_approval" and writes == []
     with tenant_tx(world.tenant_id) as session:
         approvals.decide(session, owner, waiting.approval_id, "approve")
-    published = service.execute_commerce_action(owner, **arguments)
+    def unavailable_projection(*args):
+        raise GluonsError("INSUFFICIENT_EVIDENCE", "Projection changed", status=409)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "record_provider_fact", unavailable_projection)
+        published = service.execute_commerce_action(owner, **arguments)
+    assert published.verified and any("needs reconciliation" in warning for warning in published.warnings)
     repeated = service.execute_commerce_action(owner, **arguments)
     assert published.verified is True and repeated.duplicate is True and len(writes) == 1
     with tenant_tx(world.tenant_id) as session:
         saved = session.get(LaunchPlan, plan["id"])
         assert saved.state["published_product_receipts"] == [published.receipt_id]
     assert service.record_provider_fact(owner, plan["id"], published.receipt_id)["whole_store_launch_verified"] is False
+    projected = launch.get_plan(owner, plan["id"])["readiness"]
+    publication = projected["checks"]["publication"]
+    assert publication["status"] == "blocked" and projected["store_live"] is False
+    assert [item["receipt_id"] for item in publication["recent_individual_receipts"]] == [published.receipt_id]
+    assert publication["recent_individual_receipts"][0]["environment"] == "sandbox"
+    with tenant_tx(world.tenant_id) as session:
+        receipt = session.get(ActionReceipt, published.receipt_id)
+        verified_at = receipt.verified_at
+        receipt.verified_at = utcnow() - timedelta(hours=25)
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+    with tenant_tx(world.tenant_id) as session:
+        session.get(ActionReceipt, published.receipt_id).verified_at = verified_at
+        session.get(ActionReceipt, published.receipt_id).mode = "shadow"
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+    with tenant_tx(world.tenant_id) as session:
+        session.get(ActionReceipt, published.receipt_id).mode = "live"
+        session.get(Connection, connection_id).granted_scopes = ["read_products"]
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+    with tenant_tx(world.tenant_id) as session:
+        connection = session.get(Connection, connection_id)
+        connection.granted_scopes = ["read_products", "read_publications", "write_publications"]
+        connection.disconnected_at = utcnow()
+    assert not launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"].get("recent_individual_receipts")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, connection_id).disconnected_at = None
+    other_plan = launch.create_plan(owner, goal="Different shop launch")
+    with tenant_tx(world.tenant_id) as session:
+        session.get(LaunchPlan, other_plan["id"]).state = {"store_connection_id": connection_id}
+    with pytest.raises(GluonsError) as error:
+        service.record_provider_fact(owner, other_plan["id"], published.receipt_id)
+    assert error.value.code == "INSUFFICIENT_EVIDENCE"
+    with pytest.raises(GluonsError) as error:
+        service.execute_commerce_action(owner, **{**arguments, "plan_id": other_plan["id"]})
+    assert error.value.code == "PLAN_ACTION_MISMATCH" and len(writes) == 1
+    with tenant_tx(world.tenant_id) as session:
+        session.get(LaunchPlan, plan["id"]).goal = "Changed business goal"
+    with pytest.raises(GluonsError) as error:
+        service.record_provider_fact(owner, plan["id"], published.receipt_id)
+    assert error.value.code == "INSUFFICIENT_EVIDENCE"
+    assert published.receipt_id in launch.get_plan(owner, plan["id"])["state"]["published_product_receipts"]
+    assert launch.get_plan(owner, plan["id"])["readiness"]["checks"]["publication"]["recent_individual_receipts"] == []
+
+
+def test_plan_action_key_cannot_be_reserved_by_two_plans_concurrently(world, owner, monkeypatch):
+    from gluons import launch
+    connection_id = connected(world, owner, monkeypatch)
+    plans = [launch.create_plan(owner, goal=f"Launch {name}") for name in ("one", "two")]
+    with tenant_tx(world.tenant_id) as session:
+        session.get(Connection, connection_id).account_confirmed_at = utcnow()
+        for plan in plans:
+            session.get(LaunchPlan, plan["id"]).state = {"store_connection_id": connection_id}
+    def reserve(plan):
+        try:
+            return service._reserve_plan_action(owner, plan_id=plan["id"], action="shopify.product.publish",
+                automation_id="auto_fixture", connection_id=connection_id, idempotency_key="shared-launch-key",
+                payload={"product_id": "gid://shopify/Product/123", "publication_id": "gid://shopify/Publication/7", "expected_title": "Product"})
+        except GluonsError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(reserve, plans))
+    assert sum(result is None for result in results) == 1
+    assert all(result is None or result == "PLAN_ACTION_MISMATCH" or result.status == "retry" for result in results)
+    with tenant_tx(world.tenant_id) as session:
+        intents = session.scalars(select(LaunchEvidence).where(LaunchEvidence.kind == "provider_action_intent")).all()
+        assert len(intents) == 1 and intents[0].plan_id in {plan["id"] for plan in plans}
 
 
 def fulfillment_world(world, owner, monkeypatch, fault=None):

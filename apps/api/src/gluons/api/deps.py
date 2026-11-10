@@ -37,11 +37,13 @@ def current_session(request: Request) -> SessionView:
 SessionDep = Annotated[SessionView, Depends(current_session)]
 
 
-def current_principal(view: SessionDep) -> Principal:
+def current_principal(view: SessionDep, expected_organization: Annotated[str | None, Header(alias="X-Expected-Organization")] = None) -> Principal:
     if view.mfa_pending:
         raise GluonsError("MFA_REQUIRED", "Enter your verification code.", status=401)
     if view.active_tenant_id is None:
         raise GluonsError("ORG_REQUIRED", "Choose a business first.", status=409)
+    if expected_organization is not None and expected_organization != view.active_tenant_id:
+        raise GluonsError("ORG_CHANGED", "Your active business changed in another tab. Reload to continue.", status=409)
     return identity.principal_for_user(view.user_id, view.active_tenant_id, view.session_id)
 
 

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from gluons import approvals, audit
 from gluons.authz import Principal
+from gluons.commerce import readiness
 from gluons.core import conflict, fingerprint, forbidden, new_id, not_found, utcnow, validation_failed
 from gluons.db.models import Approval, ApprovalDecision, AuditEvent, Connection, LaunchEvidence, LaunchPlan
 from gluons.db.session import tenant_tx
@@ -66,7 +67,7 @@ def _touch(session: Session, principal: Principal, plan: LaunchPlan, event: str,
     )
 
 
-def _serialize(plan: LaunchPlan) -> dict[str, Any]:
+def _serialize(session: Session, plan: LaunchPlan) -> dict[str, Any]:
     return {
         "id": plan.id, "goal": plan.goal, "country": plan.country, "product_category": plan.product_category,
         "budget_usd": str(plan.budget_usd) if plan.budget_usd is not None else None,
@@ -78,7 +79,7 @@ def _serialize(plan: LaunchPlan) -> dict[str, Any]:
             "planning": "implemented", "external_commerce": "blocked_by_external_dependency",
             "blockers": ["Shopify provider connector and approved app access", "Supplier outreach permissions and connector", "Payment-provider verified status", "Test checkout and fulfillment provider receipts"],
         },
-        "payment_status": "unverified", "store_live": False,
+        "payment_status": "unverified", "store_live": False, "readiness": readiness.project(session, plan),
     }
 
 
@@ -114,19 +115,19 @@ def create_plan(
             session, tenant_id=principal.tenant_id, category="business_launch", event_type="launch.created",
             actor=principal, resource_type="launch_plan", resource_id=plan.id, data={"stage": plan.stage},
         )
-        return _serialize(plan)
+        return _serialize(session, plan)
 
 
 def list_plans(principal: Principal) -> list[dict[str, Any]]:
     principal.require("launch:read")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
-        return [_serialize(plan) for plan in session.scalars(select(LaunchPlan).order_by(LaunchPlan.created_at.desc()))]
+        return [_serialize(session, plan) for plan in session.scalars(select(LaunchPlan).order_by(LaunchPlan.created_at.desc()))]
 
 
 def get_plan(principal: Principal, plan_id: str) -> dict[str, Any]:
     principal.require("launch:read")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
-        return _serialize(_load(session, plan_id))
+        return _serialize(session, _load(session, plan_id))
 
 
 def start(principal: Principal, plan_id: str, expected_version: int) -> dict[str, Any]:
@@ -157,7 +158,7 @@ def start(principal: Principal, plan_id: str, expected_version: int) -> dict[str
         plan.state = {**plan.state, "started": True, "planning_brief": brief, "approval_id": approval.id, "next_required_action": "owner_plan_approval"}
         plan.branch_status = "WAITING_FOR_OWNER"
         _touch(session, principal, plan, "started", {"approval_id": approval.id})
-        return _serialize(plan)
+        return _serialize(session, plan)
 
 
 def _advance_after_owner_approval(session: Session, principal: Principal, plan: LaunchPlan) -> None:
@@ -203,7 +204,7 @@ def pause(principal: Principal, plan_id: str, expected_version: int) -> dict[str
         plan.state = {**plan.state, "branch_before_pause": plan.branch_status}
         plan.branch_status = "PAUSED"
         _touch(session, principal, plan, "paused")
-        return {**_serialize(plan), "disclosure": "Future plan work is paused. Completed external actions cannot be undone."}
+        return {**_serialize(session, plan), "disclosure": "Future plan work is paused. Completed external actions cannot be undone."}
 
 
 def resume(principal: Principal, plan_id: str, expected_version: int) -> dict[str, Any]:
@@ -225,7 +226,7 @@ def resume(principal: Principal, plan_id: str, expected_version: int) -> dict[st
             else:
                 plan.branch_status = "WAITING_FOR_PROVIDER"
         _touch(session, principal, plan, "resumed")
-        return _serialize(plan)
+        return _serialize(session, plan)
 
 
 def bind_store(principal: Principal, plan_id: str, connection_id: str, expected_version: int) -> dict[str, Any]:
@@ -256,7 +257,7 @@ def bind_store(principal: Principal, plan_id: str, connection_id: str, expected_
             },
         ))
         _touch(session, principal, plan, "store_bound", {"connection_id": connection.id})
-        return _serialize(plan)
+        return _serialize(session, plan)
 
 
 def cancel(principal: Principal, plan_id: str, expected_version: int) -> dict[str, Any]:
@@ -265,7 +266,7 @@ def cancel(principal: Principal, plan_id: str, expected_version: int) -> dict[st
         plan = _load(session, plan_id, lock=True)
         check_version(plan.version, expected_version)
         if plan.branch_status == "CANCELLED":
-            return _serialize(plan)
+            return _serialize(session, plan)
         approval_id = plan.state.get("approval_id")
         approval = session.get(Approval, approval_id, with_for_update=True) if approval_id else None
         if approval and approval.status == "pending":
@@ -274,7 +275,7 @@ def cancel(principal: Principal, plan_id: str, expected_version: int) -> dict[st
         plan.branch_status = "CANCELLED"
         plan.state = {**plan.state, "next_required_action": None}
         _touch(session, principal, plan, "cancelled")
-        return {**_serialize(plan), "disclosure": "Plan work is cancelled. Completed actions are retained in the audit trail; provider accounts remain independently managed."}
+        return {**_serialize(session, plan), "disclosure": "Plan work is cancelled. Completed actions are retained in the audit trail; provider accounts remain independently managed."}
 
 
 def timeline(principal: Principal, plan_id: str) -> dict[str, Any]:
@@ -288,9 +289,10 @@ def timeline(principal: Principal, plan_id: str) -> dict[str, Any]:
 def evidence(principal: Principal, plan_id: str) -> dict[str, Any]:
     principal.require("launch:read")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
-        _load(session, plan_id)
+        plan = _load(session, plan_id)
         rows = session.scalars(select(LaunchEvidence).where(LaunchEvidence.plan_id == plan_id).order_by(LaunchEvidence.recorded_at))
         return {"plan_id": plan_id, "items": [{
             "id": row.id, "stage": row.stage, "kind": row.kind, "is_test": row.is_test,
             "source": row.source, "detail": row.detail, "receipt_id": row.receipt_id, "recorded_at": row.recorded_at.astimezone(UTC).isoformat(),
-        } for row in rows], "payment_verified": False, "live_store_verified": False, "verified_fulfillments": 0}
+        } for row in rows], "payment_verified": False, "live_store_verified": False, "verified_fulfillments": 0,
+            "readiness": readiness.project(session, plan)}

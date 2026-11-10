@@ -24,7 +24,8 @@ from gluons.db.session import tenant_tx
 # Dataset -> (model, ordered timestamp, explicitly exported columns). No global
 # identity table, credential/session table, or arbitrary metadata is reachable.
 DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
-    "organization": (m.Organization, "created_at", ("id", "name", "legal_name", "industry", "country", "timezone", "monthly_budget_usd", "created_at", "version")),
+    "organization": (m.Organization, "created_at", ("id", "name", "legal_name", "industry", "country", "timezone", "business_passport", "passport_version", "passport_consents", "monthly_budget_usd", "created_at", "version")),
+    "setup_sessions": (m.Organization, "created_at", ("id", "setup_sessions")),
     "memberships": (m.Membership, "created_at", ("id", "user_id", "role", "approval_tier_limit", "created_at", "removed_at")),
     "connections": (m.Connection, "created_at", ("id", "provider", "environment", "account_display", "status", "account_confirmed_at", "last_checked_at", "created_at", "disconnected_at", "version")),
     "assistants": (m.AgentBinding, "created_at", ("id", "user_id", "display_name", "host_kind", "status", "created_at", "last_used_at", "revoked_at")),
@@ -53,7 +54,7 @@ DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
 MAX_PAGE_BYTES = 4 * 1024 * 1024
 MAX_RECORD_BYTES = 512 * 1024
 LIMITATIONS = [
-    "Structured allowlisted records only; credentials, sessions, OAuth state, signatures, internal storage locators and arbitrary metadata are excluded.",
+    "Structured allowlisted records only; credentials, authentication sessions, OAuth state, signatures, internal storage locators and arbitrary metadata are excluded. Setup sessions are exported as sanitized summaries.",
     "Raw message/document/transcript bodies, order-line JSON, runtime inputs/outputs and provider responses are excluded; retrieve separately through authorized retention-aware workflows.",
     "The cursor fixes a creation-time cutoff where recorded, not a cross-request database snapshot; records may change during pagination. Catalog rows have no creation timestamp and use stable ID ordering.",
     "No data or account is deleted by an export.",
@@ -147,6 +148,15 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
         rows = session.execute(query).mappings().all()
         for row in rows[:limit]:
             record = {column: _value(row[column]) for column in columns}
+            if dataset == "organization":
+                record["business_passport"] = {name: {k: v for k, v in field.items() if k != "value_hash"}
+                                               for name, field in row["business_passport"].items()}
+                record["passport_consents"] = [{k: v for k, v in consent.items() if k not in {"preview_hash", "values_hash"}}
+                                               for consent in row["passport_consents"]]
+            if dataset == "setup_sessions":
+                keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "created_by",
+                        "connection_session_id", "reused_connection_id", "reused_capabilities")
+                record["setup_sessions"] = [{key: item.get(key) for key in keys} for item in row["setup_sessions"].values()]
             record_bytes = len(canonical_json(record).encode())
             if record_bytes > MAX_RECORD_BYTES:
                 raise GluonsError("EXPORT_RECORD_TOO_LARGE", "A structured record exceeds the export safety limit; request administrator-assisted review.", status=422,

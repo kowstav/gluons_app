@@ -49,7 +49,7 @@ def create_app() -> FastAPI:
         allow_origins=settings.web_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "Authorization", "MCP-Protocol-Version", "Mcp-Session-Id", "Mcp-Client-Info"],
+        allow_headers=["Content-Type", "X-CSRF-Token", "X-Expected-Organization", "Idempotency-Key", "Authorization", "MCP-Protocol-Version", "Mcp-Session-Id", "Mcp-Client-Info"],
         expose_headers=["Mcp-Session-Id"],
     )
 

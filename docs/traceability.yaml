@@ -631,6 +631,7 @@
   status: partial
   code:
   - apps/web/src
+  - apps/web/src/components/setup-room.tsx
   tests:
   - apps/web/tests/owner-flow.spec.ts
 - id: WB-02
@@ -660,8 +661,11 @@
   - apps/web/src
   - apps/web/src/components/operations.tsx
   - apps/web/src/components/console.tsx
+  - apps/web/src/components/setup-room.tsx
+  - apps/api/src/gluons/setup_sessions.py
   tests:
   - apps/web/tests/owner-flow.spec.ts
+  - apps/api/tests/test_setup_measurements.py
 - id: WB-05
   source: doc01
   requirement: Automation setup and trial studio
