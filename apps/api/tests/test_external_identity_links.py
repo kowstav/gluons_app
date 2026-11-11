@@ -6,7 +6,7 @@ import pytest
 from gluons import external_identity_intents as intents
 from gluons import external_identity_links as links
 from gluons import google_identity, identity
-from gluons.core import GluonsError, utcnow
+from gluons.core import GluonsError, new_id, utcnow
 from gluons.db.models import User
 from gluons.db.session import public_tx
 from helpers import PASSWORD, World
@@ -27,11 +27,12 @@ def test_matching_email_never_implicitly_links_and_subject_is_unique(world):
     other = World.create("Other business")
     first = identity.login(world.email, PASSWORD)
     second = identity.login(other.email, PASSWORD)
-    provider = verified("synthetic-subject", world.email)
+    subject = new_id("subject")
+    provider = verified(subject, world.email)
     with pytest.raises(GluonsError):
         links.sign_in(provider)
     links.link(linking_intent(first.token), provider, session_token=first.token)
-    issued = links.sign_in(verified("synthetic-subject", other.email))
+    issued = links.sign_in(verified(subject, other.email))
     assert issued.user_id == world.user_id
     with pytest.raises(GluonsError):
         links.link(linking_intent(second.token), provider, session_token=second.token)
@@ -48,9 +49,9 @@ def test_revoked_session_and_last_login_protection(world):
     intent = linking_intent(issued.token)
     identity.logout(issued.token)
     with pytest.raises(GluonsError):
-        links.link(intent, verified("subject-revoked", world.email), session_token=issued.token)
+        links.link(intent, verified(new_id("subject"), world.email), session_token=issued.token)
     fresh = identity.login(world.email, PASSWORD)
-    provider = verified("subject-active", world.email)
+    provider = verified(new_id("subject"), world.email)
     links.link(linking_intent(fresh.token), provider, session_token=fresh.token)
     with public_tx() as session:
         user = session.get(User, world.user_id)
