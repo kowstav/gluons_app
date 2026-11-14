@@ -1,5 +1,7 @@
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
+export const SIGNED_OUT_EVENT = "gluons:signed-out";
+
 export class ApiError extends Error {
   constructor(public code: string, message: string, public status: number) { super(message); }
 }
@@ -19,12 +21,16 @@ export async function api<T = Record<string, unknown>>(path: string, options: { 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const fields = data.error?.details?.fields?.map((f: { field: string; message: string }) => `${f.field}: ${f.message}`).join(" ");
+    // The shell listens for this and returns the owner to sign-in instead of showing a dead screen.
+    if (data.error?.code === "AUTH_REQUIRED") window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
     throw new ApiError(data.error?.code || "REQUEST_FAILED", fields || data.error?.message || `Request failed (${response.status}).`, response.status);
   }
   return data as T;
 }
 
 export type Row = Record<string, unknown>;
+/** Permission check for showing or enabling controls. The server enforces the real decision. */
+export type Can = (permission: string) => boolean;
 export type Organization = { id: string; name: string; role: string; permissions?: string[]; monthly_budget_usd?: string | null; emergency_stop_at?: string | null; industry?: string | null };
 export type Session = { user: { id: string; email: string; display_name: string }; active_organization_id: string | null; organizations: Organization[]; mfa_pending: boolean; environment: string };
 export type Skill = { id: string; title: string; industry: string; domain: string; outcome?: string; risk_tier: string; activation_modes: string[]; capability: { status: string; blockers: { requirement?: string; description?: string; name?: string; [key: string]: unknown }[] }; connectors: { capability: string; providers: string[]; purpose: string; required_for_live: boolean }[]; limitations?: string[]; actions?: Row[]; workflow?: Row[]; required_data?: string[] };

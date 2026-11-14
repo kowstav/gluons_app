@@ -43,19 +43,20 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByLabel("Email address", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Make room for better work." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add your first business", exact: true })).toBeVisible();
   await page.getByLabel("Business name", { exact: true }).fill(`Test Business ${id}`);
   await page.getByLabel("Industry", { exact: true }).fill("Food distribution");
   await page.getByLabel("Country code", { exact: true }).fill("IN");
   await page.getByRole("button", { name: "Create business workspace" }).click();
-  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business Pulse", exact: true })).toBeVisible();
   await expect(page.getByText("0", { exact: true }).first()).toBeVisible();
   await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("business-pulse.png"), fullPage: true });
 
   await navigate(page, "Business setup");
   await expect(page.getByRole("heading", { name: "Business setup", exact: true })).toBeVisible();
-  await expect(page.getByText(`Test Business ${id}`, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("banner").getByText(`Test Business ${id}`, { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText(`Test Business ${id}`, { exact: true })).toBeVisible();
   let dropFirstSetupResponse = true;
   await page.route("**/v1/setup-sessions", async route => {
     if (route.request().method() === "POST" && dropFirstSetupResponse) {
@@ -118,9 +119,9 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByLabel("Email address", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Choose your business.", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a business", exact: true })).toBeVisible();
   await page.getByRole("button", { name: new RegExp(`Test Business ${id}`) }).click();
-  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business Pulse", exact: true })).toBeVisible();
   await navigate(page, "Business setup");
   await expect(page.getByText("Configure the provider integration", { exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toBeVisible();
@@ -132,15 +133,16 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
 
   if (await menu.isVisible()) await menu.click();
   await page.locator(".workspace-selector").click();
-  await expect(page.getByRole("heading", { name: "Choose your business.", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a business", exact: true })).toBeVisible();
   await page.getByLabel("Business name", { exact: true }).fill(`Second Business ${id}`);
   await page.getByLabel("Country code", { exact: true }).fill("US");
   await page.getByRole("button", { name: "Create business workspace" }).click();
-  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business Pulse", exact: true })).toBeVisible();
   await navigate(page, "Business setup");
   await expect(page).toHaveURL(/\/business-setup$/);
   await expect(page.getByRole("heading", { name: "Business setup", exact: true })).toBeVisible();
-  await expect(page.getByText(`Second Business ${id}`, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("banner").getByText(`Second Business ${id}`, { exact: true })).toBeVisible();
+  await expect(page.getByRole("main").getByText(`Second Business ${id}`, { exact: true })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toHaveCount(0);
   await expect(page.getByLabel("Choose saved setup")).toHaveCount(0);
   await previousBusinessTab.getByRole("button", { name: "Start a new setup", exact: true }).click();
@@ -151,9 +153,9 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await expect(page.getByLabel("Choose saved setup")).toHaveCount(0);
   if (await menu.isVisible()) await menu.click();
   await page.locator(".workspace-selector").click();
-  await expect(page.getByRole("heading", { name: "Choose your business.", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a business", exact: true })).toBeVisible();
   await page.getByRole("button", { name: new RegExp(`Test Business ${id}`) }).click();
-  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Business Pulse", exact: true })).toBeVisible();
   await navigate(page, "Business setup");
   await expect(page.getByRole("listitem").filter({ hasText: `Synthetic Brand ${id}` })).toBeVisible();
   await expect(page.getByLabel("Choose saved setup").locator("option")).toHaveCount(2);
@@ -166,22 +168,27 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByLabel("Monthly budget (USD)", { exact: true }).fill("5");
   await page.getByRole("button", { name: "Create draft automation" }).click();
   await expect(page.getByRole("heading", { name: `Browser Order Trial ${id}`, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "permissions", exact: true }).click();
+  await page.getByRole("tab", { name: "Permissions", exact: true }).click();
   await page.getByLabel("Allowed action names").fill("email.send");
   await page.getByLabel("Only this email recipient (optional)").fill("proof@example.com");
   await page.getByLabel("Policy expiration (optional)").fill("2099-01-01T12:00");
   await page.getByRole("button", { name: "Propose policy", exact: true }).click();
   await expect(page.getByText("Policy proposed. Review and sign it before activation.")).toBeVisible();
-  await expect(page.getByText(/"allowed_recipients"/)).toContainText("proof@example.com");
-  await expect(page.getByText(/"allowed_recipients"/)).toContainText('"expires_at"');
+  const proposed = page.locator(".receipt").filter({ hasText: "Policy version" }).first();
+  await expect(proposed.getByText("proof@example.com", { exact: true })).toBeVisible();
+  await expect(proposed.getByText("expires at", { exact: true })).toBeVisible();
+  await page.getByText("Exact record", { exact: true }).first().click();
+  await expect(proposed.locator("pre")).toContainText('"allowed_recipients"');
   await page.getByRole("button", { name: "Start shadow trial", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("start-trial recorded");
+  await expect(page.getByRole("status")).toContainText("Shadow trial started");
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByText("paused", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel automation", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("cannot be resumed");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel automation", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Cancellation recorded");
   await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
 

@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
+// Optional: point at an already-installed Chromium when the pinned browser build is unavailable.
+const chromium = process.env.GLUONS_E2E_CHROMIUM;
 const python = process.env.GLUONS_E2E_PYTHON || path.resolve("../../.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 export default defineConfig({
@@ -10,7 +12,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
-  use: { baseURL: "http://localhost:3001", trace: "retain-on-failure", screenshot: "only-on-failure" },
+  use: { baseURL: "http://localhost:3001", trace: "retain-on-failure", screenshot: "only-on-failure", ...(chromium ? { launchOptions: { executablePath: chromium } } : {}) },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
     { name: "mobile", use: { ...devices["Pixel 7"] } },
