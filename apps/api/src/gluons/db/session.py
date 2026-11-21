@@ -35,8 +35,20 @@ def lock_engine() -> Engine:
     return create_engine(get_settings().database_url, poolclass=NullPool)
 
 
+@lru_cache
+def _app_sessions() -> sessionmaker[Session]:
+    return sessionmaker(bind=app_engine(), expire_on_commit=False)
+
+
+@lru_cache
+def _system_sessions() -> sessionmaker[Session]:
+    return sessionmaker(bind=system_engine(), expire_on_commit=False)
+
+
 def reset_engines() -> None:
     """Tests swap databases between sessions."""
+    _app_sessions.cache_clear()
+    _system_sessions.cache_clear()
     for factory in (app_engine, system_engine, lock_engine):
         try:
             factory().dispose()
@@ -57,8 +69,7 @@ def tenant_tx(tenant_id: str, user_id: str | None = None) -> Iterator[Session]:
     """One transaction scoped to a tenant. `set_config(..., true)` is transaction local."""
     if not tenant_id:
         raise ValueError("tenant_tx requires a tenant id")
-    factory = sessionmaker(bind=app_engine(), expire_on_commit=False)
-    with factory() as session, session.begin():
+    with _app_sessions()() as session, session.begin():
         _bind_context(session, tenant_id, user_id)
         yield session
 
@@ -66,8 +77,7 @@ def tenant_tx(tenant_id: str, user_id: str | None = None) -> Iterator[Session]:
 @contextmanager
 def user_tx(user_id: str) -> Iterator[Session]:
     """A user with no selected tenant: sees global tables and their own memberships."""
-    factory = sessionmaker(bind=app_engine(), expire_on_commit=False)
-    with factory() as session, session.begin():
+    with _app_sessions()() as session, session.begin():
         _bind_context(session, None, user_id)
         yield session
 
@@ -75,16 +85,14 @@ def user_tx(user_id: str) -> Iterator[Session]:
 @contextmanager
 def public_tx() -> Iterator[Session]:
     """No tenant, no user: only global tables such as the skill catalog and sign-in."""
-    factory = sessionmaker(bind=app_engine(), expire_on_commit=False)
-    with factory() as session, session.begin():
+    with _app_sessions()() as session, session.begin():
         _bind_context(session, None, None)
         yield session
 
 
 @contextmanager
 def system_tx() -> Iterator[Session]:
-    factory = sessionmaker(bind=system_engine(), expire_on_commit=False)
-    with factory() as session, session.begin():
+    with _system_sessions()() as session, session.begin():
         yield session
 
 

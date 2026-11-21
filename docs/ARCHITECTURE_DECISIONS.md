@@ -119,3 +119,22 @@ A deletion request closes access at once. After `GLUONS_DELETION_GRACE_DAYS` (de
 ## ADR-030 Isolated Gmail self-proof
 
 The first provider proof uses a test-only skill and action in an explicitly enabled local environment with a loopback database and isolated skill catalog. It follows the existing gateway, signed policy, owner approval, receipt, and Gmail readback boundaries. The fixed synthetic message can go only to the confirmed account, with a narrowly scoped policy expiring within 24 hours and a stable automation-wide idempotency key. Authority and connection state are rechecked under database locks immediately before the write; an uncertain outcome is reconciled instead of blindly resent. The test fixture does not change the historical blueprint or establish production readiness, delivery, or a real-provider result. Real execution requires separate owner authorization and private evidence.
+
+## ADR-031 The API returns the CSRF token from the session endpoint
+The deployed web app and API are separate hosts (`web_host`, `api_host`), so the web app cannot read a cookie the API sets. Reading `gluons_csrf` from `document.cookie` only worked locally, where both share `localhost`; deployed, every write would have failed its CSRF check. The token is now derived as an HMAC of the session token under the signing key, so the API can return it from sign-in and from `GET /v1/auth/session` after a reload. Only an allowed web origin can read that response, it is never cached, and the session cookie it derives from stays HttpOnly. The stored hash and the header check are unchanged. Sessions issued before this keep using their cookie until they expire. The second-step endpoint now requires the header as well. The two hosts must share a registrable domain, or browsers will not send the `SameSite=Lax` session cookie.
+
+**Pending:** the web client still reads the cookie. It needs to keep `csrf_token` from the sign-in and session responses in memory and send that instead. Until it does, deployed writes still fail the CSRF check; local use is unaffected because the cookie is still set and now holds the same derived value.
+
+## ADR-032 Second-step codes work once, and enrolling keeps the enrolling session
+A time-based code stayed valid for its whole window, so one seen in transit or over a shoulder could be replayed. The last accepted 30-second step is stored (`users.mfa_last_step`, migration 0015) and any code at or before it is refused. Signing in again straight after enrolling therefore needs the next code. Enrolling marks the enrolling browser session as verified, since it just proved the code; every other session of that user is held at the second step. Enrolment cannot be confirmed twice. Stored password hashes are upgraded at sign-in when the hashing cost has been raised.
+
+## ADR-033 Baseline protections at the API edge of the process
+These hold without Cloud Armor or a load balancer in front, in the same spirit as ADR-026:
+- One request body is limited to 2 MiB, counted as it arrives so a chunked upload is bounded too. Webhook routes keep their own smaller limits.
+- An unexpected failure returns the standard error envelope with code `INTERNAL_ERROR` and nothing about the failure; the traceback stays in the server log under the request id. It is produced inside CORS handling so the web app can read it.
+- Every response is `no-store`, cannot be framed, and carries a deny-all content policy outside `/docs`. Hosted responses add HSTS. The web app's own headers are unchanged.
+- A hosted environment refuses to start with a wildcard, non-https or path-bearing web origin, a development database password, the file mail transport, or a session lifetime outside 1 hour to 30 days.
+- Customer-entered endpoints are refused unless every resolved address is globally routable, which also covers carrier-grade NAT, the unspecified address, multicast and IPv4-mapped forms. The check still runs at validation time only; pinning the resolved address for the later request (as the client-metadata fetch already does) remains open.
+- Owner changes for one business are serialized, so two owners demoting or removing each other at the same moment cannot leave it with none.
+
+Performance changes with no behaviour change: `last_seen_at` is written at most every five minutes instead of on every request, session factories are built once, and the vault key provider (a KMS client when hosted) is reused across calls.

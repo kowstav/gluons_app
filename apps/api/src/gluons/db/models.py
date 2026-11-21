@@ -62,6 +62,8 @@ class User(Base):
     mfa_secret_ref: Mapped[str | None] = mapped_column(Text)
     mfa_enabled_at: Mapped[datetime | None] = _ts()
     mfa_recovery_hashes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    # Last accepted 30-second step, so a time-based code works once.
+    mfa_last_step: Mapped[int | None] = mapped_column(BigInteger)
     failed_logins: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     locked_until: Mapped[datetime | None] = _ts()
     disabled_at: Mapped[datetime | None] = _ts()

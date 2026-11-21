@@ -14,7 +14,8 @@ Nothing here has been run against Google Cloud yet. Each step needs the owner's 
 8. Check `/ready`, then confirm that every table in `TENANT_TABLES` shows forced row level security in `pg_class` on the new database.
 9. Unpause the worker scheduler last.
 10. Sign in once and check the logged client address against your own. If every request shows the load balancer's address, `GLUONS_TRUSTED_PROXY_HOPS` is wrong, and the per-address limits would treat all users as one.
-11. Register the provider URLs in `docs/ACCOUNT_CONNECTIONS.md` with Google, Shopify, Meta and ElevenLabs.
+11. The web and API hostnames must share a registrable domain (for example `app.example.com` and `api.example.com`), or browsers will not send the session cookie. Once the web client reads the CSRF token from the session response (pending, ADR-031), sign in, reload the page and save a change: a `CSRF_FAILED` answer means the web origin is missing from `GLUONS_ALLOWED_WEB_ORIGINS` or the bundle was built with the wrong `NEXT_PUBLIC_API_URL` (ADR-031).
+12. Register the provider URLs in `docs/ACCOUNT_CONNECTIONS.md` with Google, Shopify, Meta and ElevenLabs.
 
 ## Later releases
 

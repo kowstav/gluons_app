@@ -67,7 +67,8 @@ def test_a_correct_code_clears_the_count_and_a_recovery_code_works_once():
     issued = sign_in(email)
     with pytest.raises(GluonsError):
         identity.verify_mfa(issued.token, wrong_code(secret))
-    identity.verify_mfa(issued.token, pyotp.TOTP(secret).now())
+    # Enrolment used the current code and a code works once, so this is the next one.
+    identity.verify_mfa(issued.token, pyotp.TOTP(secret).at(utcnow() + timedelta(seconds=30)))
     with public_tx() as session:
         assert session.get(User, user_id).failed_logins == 0
 

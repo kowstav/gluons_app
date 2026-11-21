@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 from pathlib import Path
 
 import pyotp
@@ -11,7 +12,7 @@ from sqlalchemy import select, text
 
 from gluons import identity, vault
 from gluons.config import Settings, get_settings, validate_for_environment
-from gluons.core import GluonsError, new_id
+from gluons.core import GluonsError, new_id, utcnow
 from gluons.db.models import IdentitySession, User
 from gluons.db.session import public_tx, tenant_tx
 from helpers import PASSWORD, add_member, make_user
@@ -99,7 +100,10 @@ def test_mfa_enrollment_verification_and_recovery_codes(database):
     assert identity.resolve_session(issued.token).mfa_pending is True
     with pytest.raises(GluonsError, match="not valid"):
         identity.verify_mfa(issued.token, "000000")
-    identity.verify_mfa(issued.token, pyotp.TOTP(secret).now())
+    # Enrolment used the current code, and a code works once, so sign-in needs the next one.
+    with pytest.raises(GluonsError, match="not valid"):
+        identity.verify_mfa(issued.token, pyotp.TOTP(secret).now())
+    identity.verify_mfa(issued.token, pyotp.TOTP(secret).at(utcnow() + timedelta(seconds=30)))
     assert identity.resolve_session(issued.token).mfa_pending is False
 
     second = identity.login(address, PASSWORD)

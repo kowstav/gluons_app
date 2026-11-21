@@ -13,7 +13,7 @@ from typing import Any
 import pyotp
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from gluons import audit, mail, vault
@@ -25,6 +25,7 @@ from gluons.core import (
     conflict,
     constant_time_equals,
     forbidden,
+    hmac_sha256_hex,
     new_id,
     new_secret_token,
     not_found,
@@ -47,6 +48,9 @@ _DUMMY_HASH = _hasher.hash("gluons-timing-equalizer")
 MAX_FAILED_LOGINS = 8
 LOCKOUT = timedelta(minutes=15)
 MIN_PASSWORD_LENGTH = 12
+# last_seen_at is informational. Writing it on every request would turn each read into a commit.
+LAST_SEEN_RESOLUTION = timedelta(minutes=5)
+TOTP_STEP_SECONDS = 30
 
 
 def _normalize_email(email: str) -> str:
@@ -103,6 +107,35 @@ def verify_email(raw_token: str) -> None:
         session.execute(update(User).where(User.id == token.user_id).values(email_verified_at=utcnow()))
 
 
+def csrf_token_for(session_token: str) -> str:
+    """The CSRF token is derived from the session token rather than random.
+
+    The web app and the API are separate hosts when deployed, so the web app cannot read a
+    cookie the API sets. Deriving the token lets the session endpoint return it again after
+    a reload. Only an allowed web origin can read that response, and the session cookie it
+    is derived from is HttpOnly.
+    """
+    settings = get_settings()
+    return hmac_sha256_hex(settings.key_bytes(settings.signing_key_b64), f"gluons-csrf-v1:{session_token}")
+
+
+def _accept_totp(user: User, secret: str, code: str) -> bool:
+    """Accepts a time-based code once. A code seen over a shoulder or in transit cannot be replayed."""
+    digits = code.strip().replace(" ", "")
+    if not (digits.isascii() and digits.isdigit() and len(digits) == 6):
+        return False
+    totp, now = pyotp.TOTP(secret), utcnow()
+    for offset in (0, -1, 1):
+        moment = now + timedelta(seconds=offset * TOTP_STEP_SECONDS)
+        step = int(moment.timestamp()) // TOTP_STEP_SECONDS
+        if constant_time_equals(totp.at(moment), digits):
+            if user.mfa_last_step is not None and step <= user.mfa_last_step:
+                return False
+            user.mfa_last_step = step
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class IssuedSession:
     session_id: str
@@ -114,7 +147,8 @@ class IssuedSession:
 
 def _create_session(session: Session, user: User, ip: str | None, user_agent: str | None) -> IssuedSession:
     settings = get_settings()
-    raw, csrf = new_secret_token("gs_"), new_secret_token()
+    raw = new_secret_token("gs_")
+    csrf = csrf_token_for(raw)
     identity = IdentitySession(
         id=new_id("ses"),
         user_id=user.id,
@@ -156,6 +190,9 @@ def login(email: str, password: str, *, ip: str | None = None, user_agent: str |
                 # password could sign in again between guesses and never reach the limit.
                 user.failed_logins = 0
             user.locked_until = None
+            if _hasher.check_needs_rehash(user.password_hash):
+                # Cost parameters rise over time; upgrade the stored hash while the password is in hand.
+                user.password_hash = _hasher.hash(password)
             return _create_session(session, user, ip, user_agent)
         # Returning normally commits the failure count, which raising here would roll back.
         user.failed_logins += 1
@@ -176,7 +213,7 @@ def verify_mfa(session_token: str, code: str) -> None:
             raise GluonsError("ACCOUNT_LOCKED", "Too many attempts. Try again in a few minutes.", status=429)
         secret = vault.open_global(f"mfa:{user.id}", user.mfa_secret_ref)
         hashed = token_hash(code.strip())
-        if pyotp.TOTP(secret).verify(code, valid_window=1) or hashed in user.mfa_recovery_hashes:
+        if _accept_totp(user, secret, code) or hashed in user.mfa_recovery_hashes:
             user.mfa_recovery_hashes = [h for h in user.mfa_recovery_hashes if h != hashed]
             user.failed_logins = 0
             identity.mfa_verified_at = now
@@ -203,17 +240,26 @@ def begin_mfa_enrollment(user_id: str) -> dict[str, Any]:
     return {"secret": secret, "otpauth_uri": uri}
 
 
-def confirm_mfa_enrollment(user_id: str, code: str) -> list[str]:
+def confirm_mfa_enrollment(user_id: str, code: str, session_id: str | None = None) -> list[str]:
+    """Turns two-step verification on. The enrolling session just proved the code, so it stays
+    signed in; every other session of this user must pass the second step before it continues."""
     with user_tx(user_id) as session:
-        user = session.get(User, user_id)
+        user = session.get(User, user_id, with_for_update=True)
         if user is None or user.mfa_secret_ref is None:
             raise conflict("Start enrolling first.")
+        if user.mfa_enabled_at is not None:
+            raise conflict("Two-step verification is already on.")
         secret = vault.open_global(f"mfa:{user_id}", user.mfa_secret_ref)
-        if not pyotp.TOTP(secret).verify(code, valid_window=1):
+        if not _accept_totp(user, secret, code):
             raise GluonsError("AUTH_FAILED", "That code is not valid.", status=401)
         codes = [base64.b32encode(new_secret_token(nbytes=8).encode()).decode()[:16] for _ in range(8)]
+        now = utcnow()
         user.mfa_recovery_hashes = [token_hash(c) for c in codes]
-        user.mfa_enabled_at = utcnow()
+        user.mfa_enabled_at = now
+        if session_id is not None:
+            current = session.get(IdentitySession, session_id)
+            if current is not None and current.user_id == user_id:
+                current.mfa_verified_at = now
     return codes
 
 
@@ -235,6 +281,8 @@ class SessionView:
     active_tenant_id: str | None
     csrf_token_hash: str
     mfa_pending: bool
+    # None for a session issued before tokens were derived; that browser keeps using its cookie.
+    csrf_token: str | None = None
 
 
 def resolve_session(raw: str) -> SessionView:
@@ -243,7 +291,10 @@ def resolve_session(raw: str) -> SessionView:
         user = session.get(User, identity.user_id)
         if user is None or user.disabled_at is not None:
             raise auth_required()
-        identity.last_seen_at = utcnow()
+        now = utcnow()
+        if identity.last_seen_at is None or now - identity.last_seen_at >= LAST_SEEN_RESOLUTION:
+            identity.last_seen_at = now
+        derived = csrf_token_for(raw)
         return SessionView(
             session_id=identity.id,
             user_id=user.id,
@@ -252,6 +303,7 @@ def resolve_session(raw: str) -> SessionView:
             active_tenant_id=identity.active_tenant_id,
             csrf_token_hash=identity.csrf_token_hash,
             mfa_pending=user.mfa_enabled_at is not None and identity.mfa_verified_at is None,
+            csrf_token=derived if constant_time_equals(token_hash(derived), identity.csrf_token_hash) else None,
         )
 
 
@@ -502,6 +554,10 @@ def list_members(principal: Principal) -> list[dict[str, Any]]:
 
 
 def _active_owners(session: Session, tenant_id: str) -> int:
+    """Counts owners under a per-business transaction lock, so two owners demoting or removing
+    each other at the same moment cannot both pass the last-owner check."""
+    session.execute(text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": f"owners:{tenant_id}"})
+    session.expire_all()
     return session.execute(
         select(func.count())
         .select_from(Membership)

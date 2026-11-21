@@ -141,6 +141,19 @@ def validate_for_environment(s: Settings) -> None:
     for name, url in (("GLUONS_PUBLIC_API_URL", s.public_api_url), ("GLUONS_PUBLIC_WEB_URL", s.public_web_url)):
         if not url.startswith("https://"):
             problems.append(f"{name} must be https")
+    # Credentialed cross-origin requests are allowed from these origins, so each must be exact and https.
+    if not s.web_origins:
+        problems.append("GLUONS_ALLOWED_WEB_ORIGINS must list the web app origin")
+    for origin in s.web_origins:
+        if "*" in origin or not origin.startswith("https://") or origin.rstrip("/") != origin or "/" in origin[len("https://"):]:
+            problems.append(f"GLUONS_ALLOWED_WEB_ORIGINS entry {origin!r} must be an exact https origin")
+    for name, url in (("GLUONS_DATABASE_URL", s.database_url), ("GLUONS_SYSTEM_DATABASE_URL", s.system_database_url)):
+        if ":gluons_app_dev@" in url or ":gluons_system_dev@" in url:
+            problems.append(f"{name} must not use the development password")
+    if s.mail_transport == "file":
+        problems.append("GLUONS_MAIL_TRANSPORT must deliver mail; the file transport is for local use")
+    if not 1 <= s.session_ttl_hours <= 24 * 30:
+        problems.append("GLUONS_SESSION_TTL_HOURS must be between 1 hour and 30 days")
     if problems:
         raise RuntimeError("Unsafe configuration: " + "; ".join(problems))
 

@@ -23,6 +23,64 @@ from gluons.skills.registry import get_registry
 
 logger = logging.getLogger("gluons.api")
 
+# Ceiling for one request body. Webhook and document routes apply their own smaller limits;
+# this bounds everything else, including routes that forget to.
+MAX_REQUEST_BYTES = 2 * 1024 * 1024
+
+
+class BodyLimit:
+    """Rejects oversized request bodies before a handler buffers them.
+
+    Counts bytes as they arrive, so a chunked upload without Content-Length is bounded too.
+    """
+
+    def __init__(self, app, limit: int = MAX_REQUEST_BYTES) -> None:  # type: ignore[no-untyped-def]
+        self.app, self.limit = app, limit
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None and declared.isdigit() and int(declared) > self.limit:
+            await self._reject(send)
+            return
+        seen, exceeded, answered = 0, False, False
+
+        async def counted_receive():  # type: ignore[no-untyped-def]
+            nonlocal seen, exceeded
+            if exceeded:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.limit:
+                    # Stop feeding the handler. Whatever it answers is replaced below.
+                    exceeded = True
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message) -> None:  # type: ignore[no-untyped-def]
+            nonlocal answered
+            if not exceeded:
+                await send(message)
+            elif not answered:
+                answered = True
+                await self._reject(send)
+
+        try:
+            await self.app(scope, counted_receive, guarded_send)
+        finally:
+            if exceeded and not answered:
+                await self._reject(send)
+
+    @staticmethod
+    async def _reject(send) -> None:  # type: ignore[no-untyped-def]
+        body = b'{"error":{"code":"PAYLOAD_TOO_LARGE","message":"That request is too large.","details":{}}}'
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -44,6 +102,21 @@ def create_app() -> FastAPI:
         redoc_url=None,
         lifespan=lifespan,
     )
+    # Registered first so it sits inside CORS: an unexpected failure still reaches the web app
+    # as a readable JSON error instead of an opaque cross-origin failure.
+    @app.middleware("http")
+    async def unexpected_errors(request: Request, call_next):  # type: ignore[no-untyped-def]
+        try:
+            return await call_next(request)
+        except Exception:
+            # The traceback stays in the server log under the request id. The client gets the
+            # usual error envelope and nothing about the failure itself.
+            logger.exception("request failed", extra={"method": request.method, "path": request.url.path})
+            return JSONResponse(
+                {"error": {"code": "INTERNAL_ERROR", "message": "Something went wrong on our side. Try again shortly.", "details": {}}},
+                status_code=500,
+            )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.web_origins,
@@ -65,6 +138,14 @@ def create_app() -> FastAPI:
             response.headers["X-Request-Id"] = request_id
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["Referrer-Policy"] = "no-referrer"
+            # API responses carry tenant data and tokens: never cached, framed or embedded elsewhere.
+            response.headers.setdefault("Cache-Control", "no-store")
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Cross-Origin-Resource-Policy"] = "same-site"
+            if not request.url.path.startswith("/docs"):
+                response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+            if settings.hosted:
+                response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
             logger.info(
                 "request",
                 extra={
@@ -115,6 +196,7 @@ def create_app() -> FastAPI:
         if router is not None:
             app.include_router(router)
     app.mount("/", create_mcp_app(mcp_server))
+    app.add_middleware(BodyLimit)
     configure_tracing(app)
     return app
 

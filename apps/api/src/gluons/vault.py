@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from functools import lru_cache
 from typing import Any, Protocol
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -62,11 +63,18 @@ class GcpKmsKeyProvider:
         return response.plaintext
 
 
+@lru_cache(maxsize=4)
+def _provider_for(kms_key_name: str | None, vault_kek_b64: str) -> KeyProvider:
+    if kms_key_name:
+        return GcpKmsKeyProvider(kms_key_name)
+    return LocalKeyProvider(base64.b64decode(vault_kek_b64))
+
+
 def key_provider(settings: Settings | None = None) -> KeyProvider:
+    """Reused across calls: building a KMS client opens a channel, and every credential read needs one."""
     settings = settings or get_settings()
-    if settings.kms_key_name:
-        return GcpKmsKeyProvider(settings.kms_key_name)
-    return LocalKeyProvider(settings.key_bytes(settings.vault_kek_b64))
+    settings.key_bytes(settings.vault_kek_b64)  # reject a malformed key before it is cached
+    return _provider_for(settings.kms_key_name, settings.vault_kek_b64)
 
 
 def _aad(scope: str, secret_id: str) -> bytes:
