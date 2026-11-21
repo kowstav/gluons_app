@@ -81,7 +81,8 @@ def login(body: LoginBody, request: Request, response: Response, _: None = limit
 
 
 @router.post("/mfa/verify")
-def mfa_verify(body: MfaBody, request: Request, _: None = limited("mfa")) -> dict[str, str]:
+def mfa_verify(body: MfaBody, request: Request, view: SessionDep, _: None = limited("mfa")) -> dict[str, str]:
+    # SessionDep checks the CSRF header, so another site cannot submit guesses with this browser's cookie.
     identity.verify_mfa(session_token(request) or "", body.code)
     return {"status": "signed_in"}
 
@@ -102,6 +103,8 @@ def session(view: SessionDep) -> dict[str, Any]:
         "organizations": identity.list_organizations(view.user_id),
         "mfa_pending": view.mfa_pending,
         "environment": get_settings().env,
+        # The web app keeps this in memory and echoes it in X-CSRF-Token. See identity.csrf_token_for.
+        "csrf_token": view.csrf_token,
     }
 
 
@@ -124,7 +127,7 @@ def mfa_enroll(view: SessionDep) -> dict[str, str]:
 
 @router.post("/mfa/confirm")
 def mfa_confirm(body: MfaBody, view: SessionDep) -> dict[str, list[str]]:
-    return {"recovery_codes": identity.confirm_mfa_enrollment(view.user_id, body.code)}
+    return {"recovery_codes": identity.confirm_mfa_enrollment(view.user_id, body.code, view.session_id)}
 
 
 @router.get("/sessions")

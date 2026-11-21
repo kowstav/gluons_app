@@ -2,6 +2,38 @@
 
 Results are recorded from actual runs, newest first. Provider-double tests are labelled as such and prove Gluons' handling only, not the provider integration.
 
+## Sign-in hardening (2026-11-21)
+
+API changes only; the owner app is unchanged. Run in a Linux cloud container on branch `ccr-b3d43185-vnkjhx`. No provider account was contacted and nothing was deployed.
+
+| Check | Result |
+|---|---|
+| Backend suite, real embedded PostgreSQL as the restricted role, real HTTP ERP simulator | **881 passed**, 0 failed, 0 skipped |
+| Playwright, the unchanged owner app against this API and real PostgreSQL, desktop Chromium and Pixel 7 | **2 passed**, 72 s |
+| Ruff across `apps/api` | Passed |
+| Traceability | 83 requirements, 0 problems |
+
+The browser run pointed Playwright at the container's Chromium build through a local, uncommitted config override, because the build Playwright 1.64.1 pins is not installed here. Terraform, container images and CI were not run.
+
+New coverage in `apps/api/tests/test_auth_hardening.py`:
+
+- **CSRF token delivery:** a client that cannot read the API's cookie gets the token from the session response and can write; a token from another session is refused; the second step requires the header.
+- **Second step:** a code is accepted once, an earlier step is refused after a later one, and enrolling keeps only the enrolling session verified.
+- **Process-level protections:** protective headers, a 413 for declared and streamed oversized bodies, and an error envelope with CORS headers and no internals on an unexpected failure.
+- **Hosted configuration:** wildcard, http and path-bearing origins, a development database password, file mail and an out-of-range session lifetime are each refused.
+- **Internal addresses:** carrier-grade NAT, unspecified, multicast and IPv4-mapped addresses are treated as unreachable.
+- **Owner changes:** two owners demoting each other at the same moment.
+
+Problems found and fixed during this round:
+
+- **Deployed writes would fail:** the web client reads the CSRF token from a cookie it can only see when it shares a host with the API. That holds locally and not in the Terraform layout. The API now returns the token from sign-in and the session endpoint; the web client change that uses it is pending (ADR-031).
+- **Second-step codes were replayable** within their time window (ADR-032).
+- **A business could end with no owner:** without the new lock, the concurrent demotion test left zero owners in 3 of 3 runs.
+- **Enabling two-step verification stranded the enrolling browser** at the second step on its next request.
+- **Unexpected failures reached the browser as an opaque cross-origin error** rather than a readable message.
+
+Not changed, and still open: the web client change above; customer-entered endpoints are checked when saved but the resolved address is not pinned for later requests; an idempotent API write whose response fails to store would run again on retry.
+
 ## Account connections and remaining work (2026-11-07)
 
 All runs are from the final commit of this round.
