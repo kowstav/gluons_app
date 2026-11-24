@@ -8,16 +8,35 @@ async function navigate(page: Page, name: string) {
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name, exact: true }).click();
 }
 
-async function verificationToken(email: string): Promise<string> {
+async function mailBody(email: string, subject: string): Promise<string> {
   const directory = path.resolve(".e2e-mail");
   for (const name of await readdir(directory)) {
     const letter = JSON.parse(await readFile(path.join(directory, name), "utf8"));
-    if (letter.to === email && letter.subject === "Verify your Gluons email") {
-      return new URL(letter.body.split("Confirm your address: ")[1]).searchParams.get("token")!;
+    if (letter.to === email && letter.subject === subject) {
+      return letter.body;
     }
   }
   throw new Error("The real API did not deliver a verification email to its local outbox.");
 }
+
+async function verificationToken(email: string): Promise<string> {
+  const body = await mailBody(email, "Verify your Gluons email");
+  return new URL(body.split("Confirm your address: ")[1]).searchParams.get("token")!;
+}
+
+test("a new owner signs in with a code and no password", async ({ page }) => {
+  const email = `code-${crypto.randomUUID()}@example.com`;
+  await page.goto("/login");
+  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Email me a code", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Check your email for an 8-digit code");
+  const body = await mailBody(email, "Your Gluons sign-in code");
+  const code = body.match(/code is ([0-9]{8})/)?.[1];
+  if (!code) throw new Error("The sign-in email did not contain a code");
+  await page.getByLabel("Email code", { exact: true }).fill(code);
+  await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Make room for better work." })).toBeVisible();
+});
 
 test("owner can verify, create a business, trial, pause, cancel and manage its records", async ({ page }, testInfo) => {
   test.setTimeout(150_000);
@@ -40,6 +59,7 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Your email is verified");
   await page.getByRole("link", { name: "Back to sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Use a password", exact: true }).click();
   await page.getByLabel("Email address", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -115,6 +135,7 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   if (await menu.isVisible()) await menu.click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
+  await page.getByRole("button", { name: "Use a password", exact: true }).click();
   await page.getByLabel("Email address", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

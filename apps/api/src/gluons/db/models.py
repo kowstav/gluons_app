@@ -81,6 +81,19 @@ class UserToken(Base):
     created_at: Mapped[datetime] = _created()
 
 
+class EmailSignInChallenge(Base):
+    """Short-lived mailbox proof bound to the browser that requested it."""
+
+    __tablename__ = "email_sign_in_challenges"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    browser_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    email_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = _ts()
+
+
 class IdentitySession(Base):
     """Browser sign-in. Authority for owner decisions; never derived from a chat."""
 

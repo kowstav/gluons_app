@@ -14,6 +14,7 @@ import pyotp
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from gluons import audit, mail, vault
@@ -83,17 +84,18 @@ def register(email: str, password: str, display_name: str) -> None:
     _check_password_strength(password)
     address = _normalize_email(email)
     web = get_settings().public_web_url
+    raw = None
     with public_tx() as session:
         existing = session.execute(select(User).where(User.email == address)).scalar_one_or_none()
-        if existing is not None:
-            mail.send(address, "Your Gluons account", "Someone tried to sign up with this address. You already have an account.")
-            return
-        user = User(
-            id=new_id("usr"), email=address, password_hash=_hasher.hash(password), display_name=display_name.strip()
-        )
-        session.add(user)
-        session.flush()
-        raw = _issue_user_token(session, user.id, "verify_email", timedelta(hours=24))
+        if existing is None:
+            user_id = session.scalar(insert(User).values(id=new_id("usr"), email=address,
+                password_hash=_hasher.hash(password), display_name=display_name.strip())
+                .on_conflict_do_nothing(index_elements=[User.email]).returning(User.id))
+            if user_id is not None:
+                raw = _issue_user_token(session, user_id, "verify_email", timedelta(hours=24))
+    if raw is None:
+        mail.send(address, "Your Gluons account", "Someone tried to sign up with this address. You already have an account.")
+        return
     mail.send(address, "Verify your Gluons email", f"Confirm your address: {web}/verify-email?token={raw}")
 
 
