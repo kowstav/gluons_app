@@ -6,9 +6,10 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 
-from gluons import identity
+from gluons import email_sign_in, identity
 from gluons.api.deps import SessionDep, session_token
 from gluons.config import get_settings
+from gluons.core import GluonsError, new_secret_token
 from gluons.ratelimit import limited
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
@@ -31,6 +32,15 @@ class LoginBody(BaseModel):
 
 class MfaBody(BaseModel):
     code: str = Field(min_length=6, max_length=32)
+
+
+class EmailCodeRequestBody(BaseModel):
+    email: EmailStr
+
+
+class EmailCodeVerifyBody(EmailCodeRequestBody):
+    challenge_id: str = Field(pattern=r"^emc_[0-9a-f]{24}$", max_length=28)
+    code: str = Field(pattern=r"^[0-9]{8}$", max_length=8)
 
 
 class ResetRequestBody(BaseModel):
@@ -76,6 +86,31 @@ def login(body: LoginBody, request: Request, response: Response, _: None = limit
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    _set_cookies(response, issued)
+    return {"status": "mfa_required" if issued.mfa_required else "signed_in", "csrf_token": issued.csrf_token}
+
+
+@router.post("/email-code/request", status_code=202)
+def request_email_code(body: EmailCodeRequestBody, response: Response, _: None = limited("email_code_request")) -> dict[str, str]:
+    browser = new_secret_token()
+    challenge_id = email_sign_in.request_code(body.email, browser)
+    response.headers["Cache-Control"] = "no-store"
+    response.set_cookie(email_sign_in.BROWSER_COOKIE, browser, max_age=email_sign_in.CODE_TTL_SECONDS,
+                        httponly=True, samesite="lax", secure=get_settings().hosted, path="/")
+    return {"challenge_id": challenge_id}
+
+
+@router.post("/email-code/verify")
+def verify_email_code(body: EmailCodeVerifyBody, request: Request, response: Response,
+                      _: None = limited("email_code_verify")) -> dict[str, Any]:
+    browser = request.cookies.get(email_sign_in.BROWSER_COOKIE)
+    if not browser or len(browser) != 43:
+        raise GluonsError("EMAIL_CODE_INVALID", "That code is invalid or expired. Request a new code.", status=401)
+    issued = email_sign_in.verify_code(body.challenge_id, browser, body.email, body.code,
+                                       ip=request.client.host if request.client else None,
+                                       user_agent=request.headers.get("user-agent"))
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(email_sign_in.BROWSER_COOKIE, path="/", secure=get_settings().hosted, httponly=True)
     _set_cookies(response, issued)
     return {"status": "mfa_required" if issued.mfa_required else "signed_in", "csrf_token": issued.csrf_token}
 

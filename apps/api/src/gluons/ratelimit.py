@@ -19,6 +19,9 @@ from gluons.db.session import public_tx, system_tx
 # name: (requests, window in seconds)
 LIMITS: dict[str, tuple[int, int]] = {
     "login": (20, 60),
+    "email_code_request": (12, 900),
+    "email_code_destination": (4, 900),
+    "email_code_verify": (30, 60),
     "mfa": (30, 60),
     "register": (10, 3600),
     "password_reset": (10, 3600),
@@ -42,6 +45,10 @@ def client_address(request: Request) -> str:
 
 
 def hit(name: str, request: Request) -> None:
+    hit_key(name, client_address(request))
+
+
+def hit_key(name: str, key: str) -> None:
     if not get_settings().rate_limits_enabled:
         return
     limit, window = LIMITS[name]
@@ -49,7 +56,7 @@ def hit(name: str, request: Request) -> None:
     start = datetime.fromtimestamp(int(now.timestamp()) // window * window, UTC)
     table = RateLimit.__table__
     with public_tx() as session:
-        count = session.execute(insert(RateLimit).values(key=f"{name}:{client_address(request)}", window_start=start, count=1)
+        count = session.execute(insert(RateLimit).values(key=f"{name}:{key}", window_start=start, count=1)
                                 .on_conflict_do_update(index_elements=[table.c.key], set_={
                                     "count": case((table.c.window_start == start, table.c.count + 1), else_=1),
                                     "window_start": start}).returning(table.c.count)).scalar_one()

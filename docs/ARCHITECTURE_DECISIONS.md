@@ -1,5 +1,9 @@
 # Architecture decisions
 
+## ADR-034 Owner sign-in by email code
+
+The owner page defaults to a short-lived email code. The code works in the browser that requested it and has five verification attempts. PostgreSQL stores keyed proofs with forced row access and purges expired challenges through existing housekeeping. New accounts are created after mailbox verification, and existing accounts keep their memberships and enrolled TOTP. The browser uses the standard session issuer. A code provides account sign-in. Spending and policy approvals keep their separate authorization requirements.
+
 ## ADR-033 Credit-limited staging
 
 An opt-in staging profile uses zonal shared-core Cloud SQL with a fixed 10 GiB disk and native Cloud Run HTTPS origins. Run a short validation window and verify teardown of disposable resources. Keep the private database, forced tenant RLS, worker IAM, and staging-only GitHub federation. Production retains its existing infrastructure settings. Verify client address attribution on the direct HTTPS route before testing sign-in limits. [Deployment runbook](runbooks/deployment.md)
