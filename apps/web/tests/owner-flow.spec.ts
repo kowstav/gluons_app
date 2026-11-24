@@ -24,8 +24,7 @@ async function verificationToken(email: string): Promise<string> {
   return new URL(body.split("Confirm your address: ")[1]).searchParams.get("token")!;
 }
 
-test("a new owner signs in with a code and no password", async ({ page }) => {
-  const email = `code-${crypto.randomUUID()}@example.com`;
+async function signInByEmail(page: Page, email: string) {
   await page.goto("/login");
   await page.getByLabel("Email address", { exact: true }).fill(email);
   await page.getByRole("button", { name: "Email me a code", exact: true }).click();
@@ -36,6 +35,65 @@ test("a new owner signs in with a code and no password", async ({ page }) => {
   await page.getByLabel("Email code", { exact: true }).fill(code);
   await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Make room for better work." })).toBeVisible();
+}
+
+test("a new owner signs in with a code and no password", async ({ page }) => {
+  await signInByEmail(page, `code-${crypto.randomUUID()}@example.com`);
+});
+
+test("a passkey signs only the reviewed spending allowance", async ({ page, context }) => {
+  const authenticator = await context.newCDPSession(page);
+  await authenticator.send("WebAuthn.enable");
+  await authenticator.send("WebAuthn.addVirtualAuthenticator", {
+    options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true,
+      isUserVerified: true, automaticPresenceSimulation: true },
+  });
+
+  await signInByEmail(page, `passkey-${crypto.randomUUID()}@example.com`);
+  await page.getByLabel("Business name", { exact: true }).fill("Passkey QA Business");
+  await page.getByRole("button", { name: "Create business workspace" }).click();
+  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  await page.goto("/security");
+  await page.getByRole("button", { name: "Add a passkey", exact: true }).click();
+  await expect(page.getByText("Passkey enrolled for spending approvals.")).toBeVisible();
+
+  const { automation, first, other } = await page.evaluate(async () => {
+    const csrf = document.cookie.split("; ").find(value => value.startsWith("gluons_csrf="))?.split("=")[1];
+    if (!csrf) throw new Error("The owner session is missing CSRF protection");
+    const headers = { "Content-Type": "application/json", "X-CSRF-Token": csrf };
+    async function post(path: string, body: unknown) {
+      const response = await fetch(`/api/v1/${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(`Test API returned ${response.status}: ${await response.text()}`);
+      return await response.json() as { id: string };
+    }
+    const create = await fetch("/api/v1/automations", {
+      method: "POST", headers: { ...headers, "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ skill_id: "multichannel_order_entry", name: "Allowance QA" }),
+    });
+    if (!create.ok) throw new Error(`Automation creation returned ${create.status}: ${await create.text()}`);
+    const automation = await create.json() as { id: string };
+    const propose = (cap: number) => post(`automation-policies?automation_id=${automation.id}`, {
+      mode: "live", currency: "USD", allowed_actions: ["erp.order.create"], connection_ids: ["synthetic-erp-scope"],
+      per_action_limit_minor: cap, spend_limit_minor_per_month: 5000, auto_limits: { "erp.order.create": { max_amount_minor: cap } },
+    });
+    const first = await propose(700);
+    const other = await propose(900);
+    const unsigned = await fetch(`/api/v1/automation-policies/${first.id}/sign`, { method: "POST", headers });
+    if (unsigned.status !== 403) throw new Error(`Signing without a passkey returned ${unsigned.status}`);
+    return { automation, first, other };
+  });
+
+  await page.goto(`/tasks/${automation.id}/policy`);
+  await page.route(`**/automation-policies/${first.id}/sign`, async route => {
+    const replay = await route.fetch({ url: route.request().url().replace(first.id, other.id) });
+    expect(replay.status()).toBe(403);
+    await route.continue();
+  });
+  const reviewedPolicy = page.locator(".receipt").filter({ hasText: "Policy 1" });
+  await reviewedPolicy.getByRole("button", { name: "Approve this allowance with a passkey" }).click();
+  await expect(page.getByText("Policy signed.", { exact: true })).toBeVisible();
+  await expect(reviewedPolicy.getByText("active", { exact: true })).toBeVisible();
+  await expect(page.locator(".receipt").filter({ hasText: "Policy 2" }).getByText("proposed", { exact: true })).toBeVisible();
 });
 
 test("owner can verify, create a business, trial, pause, cancel and manage its records", async ({ page }, testInfo) => {
@@ -196,14 +254,14 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await expect(page.getByText(/"allowed_recipients"/)).toContainText("proof@example.com");
   await expect(page.getByText(/"allowed_recipients"/)).toContainText('"expires_at"');
   await page.getByRole("button", { name: "Start shadow trial", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("start-trial recorded");
+  await expect(page.getByRole("status").filter({ hasText: "start-trial recorded." })).toBeVisible();
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByText("paused", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel automation", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Cancellation recorded");
+  await expect(page.getByRole("status").filter({ hasText: "Cancellation recorded." })).toBeVisible();
   await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
 
   await navigate(page, "Business knowledge");

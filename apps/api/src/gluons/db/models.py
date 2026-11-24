@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -110,6 +111,32 @@ class IdentitySession(Base):
     last_seen_at: Mapped[datetime | None] = _ts()
     expires_at: Mapped[datetime] = _ts(False)
     revoked_at: Mapped[datetime | None] = _ts()
+
+
+class OwnerPasskey(Base):
+    """Account-level WebAuthn credential for owner policy approval."""
+
+    __tablename__ = "owner_passkeys"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    credential_id: Mapped[bytes] = mapped_column(LargeBinary, unique=True, nullable=False)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sign_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = _created()
+    last_used_at: Mapped[datetime | None] = _ts()
+
+
+class PasskeyChallenge(Base):
+    """One-use proof bound to the authenticating session and a specific decision."""
+
+    __tablename__ = "passkey_challenges"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("identity_sessions.id", ondelete="CASCADE"), nullable=False)
+    challenge: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False)
+    decision_hash: Mapped[str | None] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime | None] = _ts()
 
 
 class ExternalIdentityLink(Base):

@@ -79,12 +79,13 @@ def _connection_health(job: Job, worker_id: str) -> None:
 @handler("housekeeping.purge")
 def _housekeeping(job: Job, worker_id: str) -> None:
     """Rows anyone can create without signing in: consent requests, installs and rate counts."""
-    from gluons import email_sign_in, ratelimit
+    from gluons import email_sign_in, passkeys, ratelimit
     from gluons.commerce.install import purge_stale as purge_installs
     from gluons.oauth.service import purge_stale as purge_oauth
     purge_oauth()
     purge_installs()
     email_sign_in.purge_expired()
+    passkeys.purge_expired()
     ratelimit.purge()
 
 

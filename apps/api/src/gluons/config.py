@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Days between an owner's deletion request and the purge, so a mistaken request can still be exported.
     deletion_grace_days: int = 30
     public_web_url: str = "http://localhost:3000"
+    passkey_origin: str | None = None
     allowed_web_origins: str = "http://localhost:3000"
 
     vault_kek_b64: str = DEV_VAULT_KEK_B64

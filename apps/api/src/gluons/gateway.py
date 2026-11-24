@@ -358,6 +358,7 @@ def _decide(
             connection_id=request.connection_id,
             amount_minor=amount,
             resources=resources,
+            amount_currency=payload_dump.get("currency"),
             pinned_policy_id=request.pinned_policy_id,
             skill_actions=request.skill_actions,
         ),

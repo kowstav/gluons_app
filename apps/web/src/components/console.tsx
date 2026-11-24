@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { signPolicyWithPasskey } from "@/lib/passkeys";
+import PasskeySettings from "./passkey-settings";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
 import { api, ApiError, Approval, AuditEvent, Automation, Organization, Row, Session, Skill, Spending } from "@/lib/api";
@@ -143,8 +145,10 @@ function SkillDetail({ id }: { id: string }) {
 }
 
 function TaskDetail({ id, can }: { id: string; can: (p: string) => boolean }) {
+  const pathname = usePathname();
   const task = useResource<Automation>(`/v1/automations/${id}`); const runs = useResource<{ runs: Row[] }>(`/v1/automations/${id}/runs`); const evidence = useResource<{ receipts: Row[]; verified_count: number; previews: number }>(`/v1/automations/${id}/evidence`);
-  const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false); const [tab, setTab] = useState("overview");
+  const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false); const [tab, setTab] = useState(pathname.endsWith("/policy") ? "permissions" : "overview");
+  useEffect(() => { if (pathname.endsWith("/policy")) setTab("permissions"); }, [pathname]);
   const a = task.data;
   useEffect(() => { if (!a || ["cancelled", "completed", "failed_terminal"].includes(a.status)) return; const timer = window.setInterval(() => { void task.load(); void runs.load(); void evidence.load(); }, 3000); return () => window.clearInterval(timer); }, [a?.status, task.load, runs.load, evidence.load]);
   async function command(action: string, body: Row = {}) { if (!a) return; setBusy(true); setError(null); setNotice(""); try { await api(`/v1/automations/${id}/${action}`, { method: "POST", body: { expected_version: a.version, ...body } }); await task.load(); await runs.load(); setNotice(action === "cancel" ? "Cancellation recorded. Already committed external actions remain in the evidence history." : `${human(action)} recorded.`); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
@@ -159,8 +163,118 @@ function TaskDetail({ id, can }: { id: string; can: (p: string) => boolean }) {
 }
 
 function Policies({ automation, can, onChange }: { automation: Automation; can: (p: string) => boolean; onChange: () => Promise<void> }) {
-  const { data, error, load } = useResource<{ policies: Row[] }>(`/v1/automations/${automation.id}/policies`); const [failure, setFailure] = useState<string | null>(null); const [notice, setNotice] = useState("");
-  return <div className="detail-grid"><Panel title="Action grants"><div className="panel-body"><ErrorBox error={error || failure} />{notice && <div className="success-box">{notice}</div>}{data?.policies.length ? data.policies.map(p => <div className="receipt" key={String(p.id)}><div className="inline-between"><strong>Policy {String(p.policy_version)}</strong><Badge status={String(p.status)}>{human(p.status)}</Badge></div><p>{human(p.mode)} · {String(p.currency || "USD")}</p><JsonView value={{ allowed_actions: p.allowed_actions, connection_ids: p.connection_ids, resource_filters: p.resource_filters, requires_approval_for: p.requires_approval_for, auto_limits: p.auto_limits, spend_limit_minor_per_month: p.spend_limit_minor_per_month, per_action_limit_minor: p.per_action_limit_minor, currency: p.currency, data_disclosures: p.data_disclosures, expires_at: p.expires_at }} /><div className="button-row">{can("policies:sign") && p.status === "proposed" && <button className="button primary" onClick={async () => { try { await api(`/v1/automation-policies/${p.id}/sign`, { method: "POST" }); await load(); await onChange(); } catch (e) { setFailure((e as Error).message); } }}>Sign this exact policy</button>}{can("policies:write") && p.status !== "revoked" && <button className="button danger-outline" onClick={async () => { try { await api(`/v1/automation-policies/${p.id}/revoke`, { method: "POST" }); await load(); await onChange(); } catch (e) { setFailure((e as Error).message); } }}>Revoke policy</button>}</div></div>) : <Empty icon="shield" title="No action policy signed">Connecting an account does not authorize this automation to act.</Empty>}</div></Panel><Panel title="Propose a bounded policy"><div className="panel-body"><form onSubmit={async e => { e.preventDefault(); setFailure(null); const fields = Object.fromEntries(new FormData(e.currentTarget)); try { const actions = String(fields.actions).split(",").map(s => s.trim()).filter(Boolean); const recipient = String(fields.recipient || "").trim(); if (recipient && actions.length !== 1) throw new Error("A recipient restriction requires exactly one action."); const expiry = String(fields.expires || ""); await api(`/v1/automation-policies?automation_id=${automation.id}`, { method: "POST", body: { mode: fields.mode, allowed_actions: actions, connection_ids: String(fields.connections).split(",").map(s => s.trim()).filter(Boolean), resource_filters: recipient ? { [actions[0]]: { allowed_recipients: [recipient] } } : {}, requires_approval_for: actions, per_action_limit_minor: fields.limit ? Math.round(Number(fields.limit) * 100) : null, currency: "USD", expires_at: expiry ? new Date(expiry).toISOString() : null } }); await load(); setNotice("Policy proposed. Review and sign it before activation."); } catch (e) { setFailure((e as Error).message); } }}><label>Execution mode<select name="mode"><option value="supervised">Supervised · approval for every action</option><option value="live">Live · within the signed policy</option></select></label><label>Allowed action names<input name="actions" placeholder="erp.order.create" required /></label><label>Connection IDs<input name="connections" placeholder="Comma-separated connection IDs" /></label><label>Only this email recipient (optional)<input name="recipient" type="email" /></label><label>Policy expiration (optional)<input name="expires" type="datetime-local" /></label><label>Per-action amount ceiling (USD)<input name="limit" type="number" min="0" step="0.01" /></label><p className="small-print">This form requires human approval for every listed action. Review exact resource restrictions before signing.</p><button className="button secondary wide" disabled={!can("policies:write")}>Propose policy</button></form><div className="form-divider">after trial and policy approval</div><button className="button primary wide" disabled={!can("automations:activate")} onClick={async () => { try { await api(`/v1/automations/${automation.id}/activate`, { method: "POST", body: { mode: "supervised", expected_version: automation.version } }); await onChange(); setNotice("Supervised activation recorded."); } catch (e) { setFailure((e as Error).message); } }}>Activate supervised mode</button></div></Panel></div>;
+  const { data, error, load } = useResource<{ policies: Row[] }>(`/v1/automations/${automation.id}/policies`);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [mode, setMode] = useState("supervised");
+  const [signingId, setSigningId] = useState<string | null>(null);
+
+  async function signPolicy(p: Row) {
+    const path = `/v1/automation-policies/${p.id}`;
+    setSigningId(String(p.id));
+    setFailure(null);
+    try {
+      if (p.requires_spending_passkey) await signPolicyWithPasskey(path);
+      else await api(`${path}/sign`, { method: "POST" });
+      await load();
+      await onChange();
+      setNotice("Policy signed.");
+    } catch (error) {
+      setFailure((error as Error).message);
+    } finally {
+      setSigningId(null);
+    }
+  }
+
+  async function proposePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFailure(null);
+    const fields = new FormData(event.currentTarget);
+    const actions = String(fields.get("actions")).split(",").map(value => value.trim()).filter(Boolean);
+    const connections = String(fields.get("connections")).split(",").map(value => value.trim()).filter(Boolean);
+    const recipient = String(fields.get("recipient") || "").trim();
+    const unattended = String(fields.get("unattended") || "").trim();
+    const limit = fields.get("limit") ? Math.round(Number(fields.get("limit")) * 100) : null;
+    const monthly = fields.get("monthly") ? Math.round(Number(fields.get("monthly")) * 100) : null;
+    const expiry = String(fields.get("expires") || "");
+    try {
+      if (recipient && actions.length !== 1) throw new Error("A recipient restriction requires exactly one action.");
+      if (unattended && (!actions.includes(unattended) || !connections.length || !limit || !monthly)) {
+        throw new Error("Choose one listed action, name its connection, and enter both spending limits.");
+      }
+      await api(`/v1/automation-policies?automation_id=${automation.id}`, {
+        method: "POST",
+        body: {
+          mode, allowed_actions: actions, connection_ids: connections,
+          resource_filters: recipient ? { [actions[0]]: { allowed_recipients: [recipient] } } : {},
+          requires_approval_for: actions.filter(action => action !== unattended),
+          auto_limits: unattended ? { [unattended]: { max_amount_minor: limit } } : {},
+          per_action_limit_minor: limit, spend_limit_minor_per_month: monthly,
+          currency: fields.get("currency"), expires_at: expiry ? new Date(expiry).toISOString() : null,
+        },
+      });
+      await load();
+      setNotice("Policy proposed. Review and sign it before activation.");
+    } catch (error) {
+      setFailure((error as Error).message);
+    }
+  }
+
+  async function activate(mode: "supervised" | "live") {
+    setFailure(null);
+    try {
+      await api(`/v1/automations/${automation.id}/activate`, {
+        method: "POST", body: { mode, expected_version: automation.version },
+      });
+      await onChange();
+      setNotice(`${human(mode)} activation recorded.`);
+    } catch (error) {
+      setFailure((error as Error).message);
+    }
+  }
+
+  return <div className="detail-grid">
+    <Panel title="Action grants"><div className="panel-body">
+      <ErrorBox error={error || failure} />
+      {notice && <div className="success-box" role="status">{notice}</div>}
+      {data?.policies.length ? data.policies.map(p => <div className="receipt" key={String(p.id)}>
+        <div className="inline-between"><strong>Policy {String(p.policy_version)}</strong><Badge status={String(p.status)}>{human(p.status)}</Badge></div>
+        <p>{human(p.mode)} · {String(p.currency || "USD")}</p>
+        <JsonView value={{ allowed_actions: p.allowed_actions, connection_ids: p.connection_ids, resource_filters: p.resource_filters,
+          requires_approval_for: p.requires_approval_for, auto_limits: p.auto_limits, spend_limit_minor_per_month: p.spend_limit_minor_per_month,
+          per_action_limit_minor: p.per_action_limit_minor, currency: p.currency, data_disclosures: p.data_disclosures, expires_at: p.expires_at }} />
+        <div className="button-row">
+          {can("policies:sign") && p.status === "proposed" && <button className="button primary" disabled={signingId !== null} onClick={() => signPolicy(p)}>
+            {p.requires_spending_passkey ? "Approve this allowance with a passkey" : "Sign this exact policy"}
+          </button>}
+          {can("policies:write") && p.status !== "revoked" && <button className="button danger-outline" onClick={async () => {
+            try { await api(`/v1/automation-policies/${p.id}/revoke`, { method: "POST" }); await load(); await onChange(); }
+            catch (error) { setFailure((error as Error).message); }
+          }}>Revoke policy</button>}
+        </div>
+      </div>) : <Empty icon="shield" title="No action policy signed">Sign a policy to grant this automation permission to act.</Empty>}
+    </div></Panel>
+    <Panel title="Propose a bounded policy"><div className="panel-body">
+      <form onSubmit={proposePolicy}>
+        <label>Execution mode<select name="mode" value={mode} onChange={event => setMode(event.target.value)}>
+          <option value="supervised">Supervised · approval for every action</option><option value="live">Live · within the signed policy</option>
+        </select></label>
+        <label>Allowed action names<input name="actions" placeholder="erp.order.create" required /></label>
+        <label>Connection IDs<input name="connections" placeholder="Comma-separated connection IDs" /></label>
+        <label>Only this email recipient (optional)<input name="recipient" type="email" /></label>
+        <label>Policy expiration (optional)<input name="expires" type="datetime-local" /></label>
+        {mode === "live" && <label>Action with unattended spending (optional)<input name="unattended" placeholder="One action name from the list above" /></label>}
+        <label>Currency<select name="currency"><option value="USD">USD</option><option value="INR">INR</option></select></label>
+        <label>Per-action amount ceiling<input name="limit" type="number" min="0" step="0.01" /></label>
+        {mode === "live" && <label>Monthly spending ceiling<input name="monthly" type="number" min="0" step="0.01" /></label>}
+        <p className="small-print">An unattended spending allowance requires both limits and the owner’s passkey.</p>
+        <button className="button secondary wide" disabled={!can("policies:write")}>Propose policy</button>
+      </form>
+      <div className="form-divider">after trial and policy approval</div>
+      <button className="button primary wide" disabled={!can("automations:activate")} onClick={() => activate("supervised")}>Activate supervised mode</button>
+      <button className="button secondary wide" disabled={!can("automations:activate")} onClick={() => activate("live")}>Activate live mode</button>
+    </div></Panel>
+  </div>;
 }
 
 function Approvals({ can }: { can: (p: string) => boolean }) {
@@ -193,7 +307,7 @@ function Costs({ org, can, onUpdate }: { org: Organization | null; can: (p: stri
 
 function Security({ session, org, can, onUpdate }: { session: Session; org: Organization | null; can: (p: string) => boolean; onUpdate: () => Promise<void> }) {
   const members = useResource<{ members: Row[] }>("/v1/organizations/current/members"); const sessions = useResource<{ sessions: Row[]; current: string }>("/v1/auth/sessions"); const assistants = useResource<{ assistants: Row[] }>("/v1/assistants"); const [error, setError] = useState<string | null>(null); const [notice, setNotice] = useState(""); const [mfa, setMfa] = useState<Row | null>(null);
-  return <><PageTitle title="Trust starts with control." description={`Manage who can act for ${org?.name}, review active sessions and stop external actions.`} /><ErrorBox error={error} />{notice && <div className="success-box" role="status">{notice}</div>}<Panel title="Your team"><ErrorBox error={members.error} retry={members.load} /><div className="panel-body">{members.data?.members.map(m => <div className="member-row" key={String(m.id)}><span className="user-avatar">{String(m.display_name || m.email || "?")[0]}</span><div className="grow"><strong>{String(m.display_name || m.email)}</strong><small>{String(m.email)}</small></div><Badge>{human(m.role)}</Badge>{can("members:manage") && <><select aria-label={`Role for ${m.email}`} className="member-role" value={String(m.role)} onChange={async e => { try { await api(`/v1/organizations/current/members/${m.id}`, { method: "PATCH", body: { role: e.target.value } }); await members.load(); } catch (err) { setError((err as Error).message); } }}>{["owner", "admin", "operator", "approver", "viewer", "field_rep", "support"].map(role => <option key={role}>{role}</option>)}</select><button className="button danger-outline compact" onClick={async () => { try { await api(`/v1/organizations/current/members/${m.id}`, { method: "DELETE" }); await members.load(); } catch (err) { setError((err as Error).message); } }}>Remove member</button></>}</div>)}{can("members:manage") && <form className="inline-form" onSubmit={async e => { e.preventDefault(); const form = e.currentTarget; const f = Object.fromEntries(new FormData(form)); try { await api("/v1/organizations/current/invitations", { method: "POST", body: f }); setNotice("Invitation sent through the configured account email delivery."); form.reset(); } catch (err) { setError((err as Error).message); } }}><label className="grow">Invite by email<input type="email" name="email" required placeholder="teammate@business.com" /></label><label>Role<select name="role">{[...(org?.role === "owner" ? ["owner"] : []), "viewer", "operator", "approver", "admin", "field_rep", "support"].map(r => <option key={r}>{r}</option>)}</select></label><button className="button secondary">Send invitation<Icon name="arrow" size={16} /></button></form>}</div></Panel><div className="home-bottom"><Panel title="Connected assistants"><ErrorBox error={assistants.error} retry={assistants.load} /><div className="panel-body">{assistants.data?.assistants.length ? assistants.data.assistants.map(a => <div className="member-row" key={String(a.id)}><span className="row-icon"><Icon name="spark" /></span><div className="grow"><strong>{String(a.client_name || a.provider || a.client_id)}</strong><small>{human(a.status)} · {Array.isArray(a.scopes) ? a.scopes.join(", ") : ""}</small></div><button className="button danger-outline compact" disabled={!can("assistants:manage")} onClick={async () => { try { await api(`/v1/assistants/${a.id}/revoke`, { method: "POST" }); await assistants.load(); } catch (err) { setError((err as Error).message); } }}>Revoke</button></div>) : <Empty icon="spark" title="Your assistants connect here">Use a compatible remote MCP client to authorize Gluons. Each authorization can be revoked independently.</Empty>}</div></Panel><Panel title="Account security"><div className="panel-body"><p className="body-copy">Signed in as <strong>{session.user.email}</strong>. Add an authenticator for a second layer of protection.</p><button className="button secondary" onClick={async () => { try { setMfa(await api<Row>("/v1/auth/mfa/enroll", { method: "POST" })); } catch (err) { setError((err as Error).message); } }}>Set up authenticator</button>{mfa && <div className="mfa-setup"><p>Store this authenticator setup in your password manager. Keep it private.</p><JsonView value={mfa} /><form onSubmit={async e => { e.preventDefault(); try { const result = await api<Row>("/v1/auth/mfa/confirm", { method: "POST", body: Object.fromEntries(new FormData(e.currentTarget)) }); setMfa(result); setNotice("Authenticator enabled. Save the recovery codes securely."); } catch (err) { setError((err as Error).message); } }}><label>Authenticator code<input name="code" required autoComplete="one-time-code" /></label><button className="button primary">Confirm authenticator</button></form></div>}</div></Panel></div><Panel title="Sign-in sessions"><ErrorBox error={sessions.error} retry={sessions.load} /><div className="panel-body">{sessions.data?.sessions.map(s => <div className="member-row" key={String(s.id)}><span className="row-icon"><Icon name="shield" /></span><div className="grow"><strong>{s.id === sessions.data?.current ? "This session" : "Signed-in session"}</strong><small>{String(s.user_agent || "Unknown browser")} · {date(s.created_at)}</small></div><button className="button secondary compact" onClick={async () => { try { await api(`/v1/auth/sessions/${s.id}`, { method: "DELETE" }); if (s.id === sessions.data?.current) await onUpdate(); else await sessions.load(); } catch (err) { setError((err as Error).message); } }}>Revoke session</button></div>)}</div></Panel>{can("emergency:stop") && <Panel title="Emergency control"><div className="panel-body inline-between"><div><h3>Stop new external actions</h3><p className="body-copy">Immediately fence new side effects for this business. Already committed actions remain in the audit history.</p></div><button className="button danger-outline" onClick={async () => { try { await api("/v1/organizations/current/emergency-stop", { method: "POST", body: { active: !org?.emergency_stop_at } }); await onUpdate(); } catch (err) { setError((err as Error).message); } }}><Icon name="stop" size={17} />{org?.emergency_stop_at ? "Release emergency stop" : "Stop external actions"}</button></div></Panel>}</>;
+  return <><PageTitle title="Trust starts with control." description={`Manage who can act for ${org?.name}, review active sessions and stop external actions.`} /><ErrorBox error={error} />{notice && <div className="success-box" role="status">{notice}</div>}<Panel title="Your team"><ErrorBox error={members.error} retry={members.load} /><div className="panel-body">{members.data?.members.map(m => <div className="member-row" key={String(m.id)}><span className="user-avatar">{String(m.display_name || m.email || "?")[0]}</span><div className="grow"><strong>{String(m.display_name || m.email)}</strong><small>{String(m.email)}</small></div><Badge>{human(m.role)}</Badge>{can("members:manage") && <><select aria-label={`Role for ${m.email}`} className="member-role" value={String(m.role)} onChange={async e => { try { await api(`/v1/organizations/current/members/${m.id}`, { method: "PATCH", body: { role: e.target.value } }); await members.load(); } catch (err) { setError((err as Error).message); } }}>{["owner", "admin", "operator", "approver", "viewer", "field_rep", "support"].map(role => <option key={role}>{role}</option>)}</select><button className="button danger-outline compact" onClick={async () => { try { await api(`/v1/organizations/current/members/${m.id}`, { method: "DELETE" }); await members.load(); } catch (err) { setError((err as Error).message); } }}>Remove member</button></>}</div>)}{can("members:manage") && <form className="inline-form" onSubmit={async e => { e.preventDefault(); const form = e.currentTarget; const f = Object.fromEntries(new FormData(form)); try { await api("/v1/organizations/current/invitations", { method: "POST", body: f }); setNotice("Invitation sent through the configured account email delivery."); form.reset(); } catch (err) { setError((err as Error).message); } }}><label className="grow">Invite by email<input type="email" name="email" required placeholder="teammate@business.com" /></label><label>Role<select name="role">{[...(org?.role === "owner" ? ["owner"] : []), "viewer", "operator", "approver", "admin", "field_rep", "support"].map(r => <option key={r}>{r}</option>)}</select></label><button className="button secondary">Send invitation<Icon name="arrow" size={16} /></button></form>}</div></Panel><div className="home-bottom"><Panel title="Connected assistants"><ErrorBox error={assistants.error} retry={assistants.load} /><div className="panel-body">{assistants.data?.assistants.length ? assistants.data.assistants.map(a => <div className="member-row" key={String(a.id)}><span className="row-icon"><Icon name="spark" /></span><div className="grow"><strong>{String(a.client_name || a.provider || a.client_id)}</strong><small>{human(a.status)} · {Array.isArray(a.scopes) ? a.scopes.join(", ") : ""}</small></div><button className="button danger-outline compact" disabled={!can("assistants:manage")} onClick={async () => { try { await api(`/v1/assistants/${a.id}/revoke`, { method: "POST" }); await assistants.load(); } catch (err) { setError((err as Error).message); } }}>Revoke</button></div>) : <Empty icon="spark" title="Your assistants connect here">Use a compatible remote MCP client to authorize Gluons. Each authorization can be revoked independently.</Empty>}</div></Panel><Panel title="Account security"><div className="panel-body"><p className="body-copy">Signed in as <strong>{session.user.email}</strong>. Add an authenticator for a second layer of protection.</p><PasskeySettings /><button className="button secondary" onClick={async () => { try { setMfa(await api<Row>("/v1/auth/mfa/enroll", { method: "POST" })); } catch (err) { setError((err as Error).message); } }}>Set up authenticator</button>{mfa && <div className="mfa-setup"><p>Store this authenticator setup in your password manager. Keep it private.</p><JsonView value={mfa} /><form onSubmit={async e => { e.preventDefault(); try { const result = await api<Row>("/v1/auth/mfa/confirm", { method: "POST", body: Object.fromEntries(new FormData(e.currentTarget)) }); setMfa(result); setNotice("Authenticator enabled. Save the recovery codes securely."); } catch (err) { setError((err as Error).message); } }}><label>Authenticator code<input name="code" required autoComplete="one-time-code" /></label><button className="button primary">Confirm authenticator</button></form></div>}</div></Panel></div><Panel title="Sign-in sessions"><ErrorBox error={sessions.error} retry={sessions.load} /><div className="panel-body">{sessions.data?.sessions.map(s => <div className="member-row" key={String(s.id)}><span className="row-icon"><Icon name="shield" /></span><div className="grow"><strong>{s.id === sessions.data?.current ? "This session" : "Signed-in session"}</strong><small>{String(s.user_agent || "Unknown browser")} · {date(s.created_at)}</small></div><button className="button secondary compact" onClick={async () => { try { await api(`/v1/auth/sessions/${s.id}`, { method: "DELETE" }); if (s.id === sessions.data?.current) await onUpdate(); else await sessions.load(); } catch (err) { setError((err as Error).message); } }}>Revoke session</button></div>)}</div></Panel>{can("emergency:stop") && <Panel title="Emergency control"><div className="panel-body inline-between"><div><h3>Stop new external actions</h3><p className="body-copy">Immediately fence new side effects for this business. Already committed actions remain in the audit history.</p></div><button className="button danger-outline" onClick={async () => { try { await api("/v1/organizations/current/emergency-stop", { method: "POST", body: { active: !org?.emergency_stop_at } }); await onUpdate(); } catch (err) { setError((err as Error).message); } }}><Icon name="stop" size={17} />{org?.emergency_stop_at ? "Release emergency stop" : "Stop external actions"}</button></div></Panel>}</>;
 }
 
 function AssistantConsent() {
