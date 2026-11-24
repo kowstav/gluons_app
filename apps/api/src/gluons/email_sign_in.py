@@ -34,6 +34,7 @@ def _bind(session: Session, challenge_id: str, browser: str) -> str:
 
 def request_code(email: str, browser: str) -> str:
     address = identity._normalize_email(email)
+    mail.require_recipient(address)
     email_hash = _proof("address", address)
     ratelimit.hit_key("email_code_destination", email_hash)
     challenge_id = new_id("emc")

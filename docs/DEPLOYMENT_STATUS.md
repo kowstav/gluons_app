@@ -1,5 +1,11 @@
 # Deployment status
 
+## Account and spending release candidate on November 24, 2026
+
+Email-code sign-in and passkey confirmation for eligible unattended spending allowances are merged. GitHub tested email code delivery through the file outbox, browser-bound one-time verification, and passkey enrollment and policy signing with Chromium's virtual authenticator on desktop and mobile. These changes still need a hosted SMTP and real-device test. [Email sign-in CI](https://github.com/kowstav/gluons_app/actions/runs/45411523731) · [Spending passkey CI](https://github.com/kowstav/gluons_app/actions/runs/45414930573)
+
+Staging still runs the earlier candidate when its database is active. Staging database activation was verified as `NEVER` after the pilot. Owner sign-in and passkey acceptance can be run against the existing services during an approved window after SMTP is configured and the newer release is deployed. [Account mail runbook](runbooks/secrets_and_webhooks.md#staging-account-mail)
+
 ## Credit-limited staging pilot on November 24, 2026
 
 The approved pilot provisioned a private `db-g1-small` with a fixed 10 GiB SSD, a scoped GitHub federation identity, scale-to-zero Cloud Run services, and a private worker. Cloud SQL rejected the first retention settings. The corrected retry used two backups and two days of transaction logs and completed the eight remaining foundation resources. [Retention correction](https://github.com/kowstav/gluons_app/pull/16) · [Deployment runbook](runbooks/deployment.md#credit-limited-staging-pilot)

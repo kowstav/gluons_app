@@ -14,10 +14,27 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from gluons.config import get_settings
-from gluons.core import new_id, utcnow
+from gluons.core import GluonsError, new_id, utcnow
+
+
+def allowed_recipients() -> frozenset[str] | None:
+    configured = get_settings().mail_allowed_recipients
+    return frozenset(item.strip().lower() for item in configured.split(",") if item.strip()) if configured else None
+
+
+def recipient_allowed(address: str) -> bool:
+    recipients = allowed_recipients()
+    return recipients is None or address.strip().lower() in recipients
+
+
+def require_recipient(address: str) -> None:
+    if not recipient_allowed(address):
+        raise GluonsError("MAIL_RECIPIENT_NOT_ALLOWED", "This Gluons environment sends mail only to approved recipients.",
+                         status=403)
 
 
 def send(to: str, subject: str, body: str) -> None:
+    require_recipient(to)
     settings = get_settings()
     if settings.mail_transport == "file":
         folder = Path(settings.mail_dir)

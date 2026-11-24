@@ -2,12 +2,14 @@
 import re
 
 import pyotp
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from gluons import email_sign_in, identity
+from gluons import email_sign_in, identity, mail
 from gluons.api.app import create_app
-from gluons.core import new_id
+from gluons.config import get_settings
+from gluons.core import GluonsError, new_id
 from gluons.db.models import EmailSignInChallenge, User
 from gluons.db.session import public_tx
 from helpers import PASSWORD, make_user
@@ -81,3 +83,16 @@ def test_mailbox_owner_does_not_activate_an_unverified_password():
         with public_tx() as session:
             user = session.execute(select(User).where(User.email == email)).scalar_one()
             assert user.email_verified_at is not None and user.password_hash is None
+
+
+def test_pilot_mail_restricts_codes_and_transactional_transport(monkeypatch):
+    allowed = f"{new_id('otp')}@example.com"
+    blocked = f"{new_id('otp')}@example.com"
+    monkeypatch.setattr(get_settings(), "mail_allowed_recipients", f" {allowed.upper()}, another@example.com")
+    with TestClient(create_app()) as client:
+        response = client.post(f"{ROOT}/request", json={"email": blocked})
+        assert response.status_code == 403
+        assert email_sign_in.BROWSER_COOKIE not in client.cookies
+        assert client.post(f"{ROOT}/verify", json=new_challenge(client, allowed)).status_code == 200
+    with pytest.raises(GluonsError, match="approved recipients"):
+        mail.send(blocked, "Subject", "Message")

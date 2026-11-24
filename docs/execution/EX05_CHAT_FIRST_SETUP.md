@@ -39,7 +39,8 @@ The fictional records support local acceptance. A real mailbox or hosted assista
 
 - Launch intake covers the initial product, market, supplier, and storefront decisions. It produces a planning draft. Provider access, public store launch, and money movement have their own gates.
 - Existing-process intake supports order-entry and inventory-reorder trials. Other processes currently end in a planning-only result.
-- Decision preferences remain separate from grants. An explicit owner-approved policy is required for provider side effects. Passwordless sign-in, passkey approval for a standing payment grant, and arbitrary composition across independently scheduled automations remain pending.
+- Decision preferences remain separate from grants. Provider side effects require an explicit owner-approved policy. The owner can sign an eligible standing spending allowance with a passkey after reviewing its action, connection, currency and limits. The assistant can request that review in chat.
+- Email-code sign-in and spending passkeys have passed GitHub tests. Hosted email delivery and real-device passkey acceptance are pending. Combining independently scheduled automations remains pending.
 - An authorized HTTPS environment, a supported assistant host, and explicitly approved provider access are needed for live acceptance. Local MCP, provider doubles, and the ERP simulator supply separate evidence.
 
 ## Local verification on November 21, 2026

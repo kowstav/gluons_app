@@ -83,6 +83,7 @@ def register(email: str, password: str, display_name: str) -> None:
     """Same response whether or not the address exists, so accounts cannot be enumerated."""
     _check_password_strength(password)
     address = _normalize_email(email)
+    mail.require_recipient(address)
     web = get_settings().public_web_url
     raw = None
     with public_tx() as session:
@@ -299,6 +300,8 @@ def revoke_session(user_id: str, session_id: str) -> None:
 
 def request_password_reset(email: str) -> None:
     address = _normalize_email(email)
+    if not mail.recipient_allowed(address):
+        return
     web = get_settings().public_web_url
     with public_tx() as session:
         user = session.execute(select(User).where(User.email == address)).scalar_one_or_none()
@@ -399,6 +402,7 @@ def invite_member(principal: Principal, email: str, role: str) -> dict[str, Any]
     if target_role == Role.OWNER and principal.role != Role.OWNER:
         raise forbidden("Only an owner can invite another owner.")
     address = _normalize_email(email)
+    mail.require_recipient(address)
     raw = new_secret_token()
     settings = get_settings()
     with tenant_tx(principal.tenant_id, principal.user_id) as session:

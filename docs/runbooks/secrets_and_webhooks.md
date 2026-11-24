@@ -2,6 +2,12 @@
 
 Secrets live in Secret Manager when hosted, and in the git-ignored `.env` locally. Never put one in chat, a ticket, a tfvars file or a log. To check that a value exists, ask Secret Manager for its metadata, not its payload.
 
+## Staging account mail
+
+Configure a dedicated staging sender with a STARTTLS endpoint and add the SMTP URL to `gluons-smtp-url` in Secret Manager. URL-encode the username and credential. Set `GLUONS_MAIL_FROM` and `GLUONS_MAIL_ALLOWED_RECIPIENTS` in staging's private Terraform inputs and include `smtp-url` in `populated_secrets`. The recipient list is comma-separated. It covers account email, invitations, and Gluons owner notifications. Customer messaging still uses its own provider connection and signed policy.
+
+For an owner-approved Gmail pilot, use `smtp.gmail.com` on port 587 with 2-Step Verification and a dedicated Google app password. Request one sign-in code to an approved test inbox, enter it in the same browser, and record the outcome without recording the address or code. Revoke the app password when ending the pilot. [Gmail transport settings](https://support.google.com/mail/answer/7104828) · [Google app passwords](https://support.google.com/accounts/answer/185833)
+
 ## Rotating a secret
 
 Add a new secret version, then redeploy so services read it. Disable the old version only after the new one works.
