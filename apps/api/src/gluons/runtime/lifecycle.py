@@ -145,12 +145,15 @@ def list_all(principal: Principal) -> list[dict[str, Any]]:
         return [serialize(a) for a in rows]
 
 
-def configure(principal: Principal, automation_id: str, config: dict[str, Any], expected_version: int) -> dict[str, Any]:
+def configure(principal: Principal, automation_id: str, config: dict[str, Any], expected_version: int,
+              *, required_skill: str | None = None) -> dict[str, Any]:
     principal.require("automations:write")
     from gluons.assist import require_active
     require_active(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         automation = _load(session, automation_id, lock=True)
+        if required_skill is not None and automation.skill_id != required_skill:
+            raise validation_failed("These settings require a matching automation skill.")
         if principal.role == Role.FIELD_REP and (automation.created_by != principal.user_id or automation.mode not in TRIAL_MODES):
             raise GluonsError("FORBIDDEN", "A representative can configure only their own replay/shadow automation.", status=403)
         check_version(automation.version, expected_version)
@@ -537,17 +540,29 @@ def submit_event(
     source_event_id: str,
     payload: dict[str, Any],
     actor: Principal | str = "webhook",
+    trial_skill_id: str | None = None,
 ) -> dict[str, Any]:
     """Turns an inbound event into at most one run, however many times it is delivered."""
+    from gluons.skills.domain import reorder
+
     if isinstance(actor, Principal):
         from gluons.assist import require_active
         require_active(actor)
     with tenant_tx(tenant_id) as session:
-        automation = _load(session, automation_id)
+        automation = _load(session, automation_id, lock=trial_skill_id is not None)
+        if trial_skill_id is not None:
+            if not isinstance(actor, Principal) or actor.tenant_id != tenant_id:
+                raise GluonsError("FORBIDDEN", "A trial case requires an authenticated actor for this business.", status=403)
+            actor.require("trials:write")
+            if automation.skill_id != trial_skill_id or TRIAL_MODES.get(automation.mode) != automation.status:
+                raise conflict("Start a replay or shadow trial for this workflow before submitting a trial case.")
         if isinstance(actor, Principal) and actor.role == Role.FIELD_REP and (automation.created_by != actor.user_id or automation.mode not in TRIAL_MODES):
             raise GluonsError("FORBIDDEN", "Representatives may submit sample events only to their own replay/shadow trial.", status=403)
         if automation.status not in ACCEPTS_EVENTS:
             raise conflict(f"This automation is {automation.status} and is not accepting work.")
+        pinned = {}
+        if automation.skill_id == reorder.SKILL_ID:
+            pinned, payload = reorder.pin_case(automation.config, payload)
         run_id = new_id("run")
         inserted = session.execute(
             insert(Run)
@@ -563,15 +578,19 @@ def submit_event(
                 source=source,
                 source_event_id=source_event_id,
                 input=payload,
+                state=pinned,
             )
             .on_conflict_do_nothing(constraint="uq_run_source_event")
             .returning(Run.id)
         ).first()
         if inserted is None:
+            columns = (Run.id, Run.mode, Run.input) if trial_skill_id is not None else (Run.id,)
             existing = session.execute(
-                select(Run.id).where(Run.automation_id == automation_id, Run.source_event_id == source_event_id)
-            ).scalar_one()
-            return {"run_id": existing, "duplicate": True}
+                select(*columns).where(Run.automation_id == automation_id, Run.source_event_id == source_event_id)
+            ).one()
+            if trial_skill_id is not None and (existing.mode != automation.mode or existing.input != payload):
+                raise conflict("This trial case key was already used for a different sample or mode.")
+            return {"run_id": existing.id, "duplicate": True}
         run_log.append(session, tenant_id, run_id, "run.created", {"source": source, "mode": automation.mode})
         queue.enqueue(session, "run.advance", {"run_id": run_id}, tenant_id=tenant_id, dedupe_key=f"run.advance:{run_id}")
         audit.record(

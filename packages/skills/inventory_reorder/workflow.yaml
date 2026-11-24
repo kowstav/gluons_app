@@ -1,0 +1,16 @@
+id: gluons.inventory_reorder
+version: 1.0.0
+industry: cross-industry
+description: Prepare a reorder review using owner-specified stock rules and a provided snapshot.
+trigger: The owner submits a snapshot to a replay or shadow trial.
+owner_outcome: A supplier-grouped draft with estimated costs and explicit exceptions.
+required_data: [saved reorder rules, stock snapshot]
+workflow:
+  - step: 1
+    instruction: Compare the stock position with the threshold and calculate pack quantities within the draft limit.
+  - step: 2
+    instruction: Group eligible items by supplier and total their estimated costs in the configured currency.
+  - step: 3
+    instruction: Report the draft and flag ambiguous counts, missing prices and quantity exceptions for review.
+failure_branches: [Invalid or ambiguous counts, Missing estimates or quantities above limit]
+metrics: [items_needing_review]

@@ -150,7 +150,9 @@ def load(skills_dir: Path, blueprint_dir: Path) -> SkillRegistry:
     for path in sorted(skills_dir.glob("*/contract.yaml")):
         slug = path.parent.name
         contract = SkillContract.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
-        folder = blueprint_dir / "playbooks" / slug if slug not in catalog else blueprint_dir / "skills" / slug
+        folder = blueprint_dir / "skills" / slug if slug in catalog else blueprint_dir / "playbooks" / slug
+        if slug not in catalog and not folder.exists() and (path.parent / "workflow.yaml").is_file():
+            folder = path.parent
         blueprint = yaml.safe_load((folder / "workflow.yaml").read_text(encoding="utf-8"))
         validate(contract, blueprint, primitives)
         fixtures = json.loads((folder / "evals.json").read_text(encoding="utf-8"))

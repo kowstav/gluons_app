@@ -27,8 +27,9 @@ locals {
 
   load_balancer_on = var.deploy_services && var.enable_load_balancer
 
-  api_url = var.api_host != "" ? "https://${var.api_host}" : var.api_url
-  web_url = var.web_host != "" ? "https://${var.web_host}" : var.web_url
+  run_app_suffix = "${data.google_project.current.number}.${var.region}.run.app"
+  api_url        = var.use_run_app_origins ? "https://${local.prefix}-api-${local.run_app_suffix}" : (var.api_host != "" ? "https://${var.api_host}" : var.api_url)
+  web_url        = var.use_run_app_origins ? "https://${local.prefix}-web-${local.run_app_suffix}" : (var.web_host != "" ? "https://${var.web_host}" : var.web_url)
 
   worker_wake_audience = "https://${local.prefix}-worker.gluons.internal/wake"
   gmail_push_audience  = "https://${local.prefix}-webhooks.gluons.internal${var.gmail_push_path}"
@@ -38,9 +39,8 @@ locals {
     GLUONS_ENV            = var.environment == "dev" ? "staging" : var.environment
     GLUONS_PUBLIC_API_URL = local.api_url
     GLUONS_PUBLIC_WEB_URL = local.web_url
-    # The external Application Load Balancer appends "<client>, <load balancer>" to
-    # X-Forwarded-For. Confirm the logged client address on first deploy (deployment runbook).
-    GLUONS_TRUSTED_PROXY_HOPS         = "2"
+    # Direct Cloud Run ingress has a different proxy chain from the external load balancer.
+    GLUONS_TRUSTED_PROXY_HOPS         = var.use_run_app_origins ? "0" : "2"
     GLUONS_ALLOWED_WEB_ORIGINS        = local.web_url
     GLUONS_GCP_PROJECT_ID             = var.project_id
     GLUONS_GCP_REGION                 = var.region
@@ -86,6 +86,7 @@ module "database" {
   tier                  = var.database_tier
   high_availability     = var.database_high_availability
   disk_size_gb          = var.database_disk_size_gb
+  disk_autoresize       = var.database_disk_autoresize
   backup_retained_count = var.backup_retained_count
   log_retention_days    = var.log_retention_days
   deletion_protection   = var.deletion_protection

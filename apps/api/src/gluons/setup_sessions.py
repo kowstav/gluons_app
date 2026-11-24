@@ -5,8 +5,9 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
 
-from gluons import audit
+from gluons import audit, setup_guidance
 from gluons.authz import Principal, Role
+from gluons.config import get_settings
 from gluons.connections import google
 from gluons.connections import service as connection_service
 from gluons.core import (
@@ -22,7 +23,7 @@ from gluons.core import (
     utcnow,
     validation_failed,
 )
-from gluons.db.models import Connection, ConnectionSession, LaunchPlan, Organization
+from gluons.db.models import Automation, Connection, ConnectionSession, LaunchPlan, Organization
 from gluons.db.session import tenant_tx
 
 MAX_SESSIONS = 50
@@ -54,6 +55,15 @@ def _owner(principal: Principal) -> None:
         raise forbidden("An authenticated business owner must manage setup in Gluons Web.")
 
 
+def _guided_owner(principal: Principal, permission: str) -> None:
+    if principal.kind == "user":
+        _owner(principal)
+    elif principal.kind != "assistant" or principal.role != Role.OWNER or not principal.user_id or not principal.binding_id:
+        raise forbidden("An authenticated business owner must guide this setup.")
+    principal.require("plans:read")
+    principal.require(permission)
+
+
 def _org(session, principal: Principal, *, lock: bool = False) -> Organization:
     org = session.get(Organization, principal.tenant_id, with_for_update=lock)
     if org is None:
@@ -75,6 +85,15 @@ def _item(org: Organization, setup_id: str, principal: Principal, *, active: boo
     if active and _expiry(item) <= utcnow():
         raise conflict("This setup expired. Start a new setup for the existing plan.")
     return deepcopy(item)
+
+
+def _guided_item(org: Organization, setup_id: str, principal: Principal, *, active: bool = False) -> dict[str, Any]:
+    item = _item(org, setup_id, principal)
+    if item["intent"] not in setup_guidance.GUIDED_INTENTS:
+        raise not_found("Workflow setup")
+    if active and _expiry(item) <= utcnow():
+        raise conflict("This workflow setup expired. Start a new setup.")
+    return item
 
 
 def _view(item: dict[str, Any], connection: ConnectionSession | None = None, account: Connection | None = None) -> dict[str, Any]:
@@ -139,12 +158,34 @@ def _render(session, item: dict[str, Any], principal: Principal) -> dict[str, An
         labels = {"reconnect_account": "Reconnect the account", "confirm_account": "Review and confirm the connected account",
                   "verify_account": "Verify the account and required access"}
         result["next_actions"] = [] if action is None else [{"code": action, "label": labels[action], "owner_url": "/connections"}]
+    if item["intent"] in setup_guidance.GUIDED_INTENTS:
+        if not setup_guidance.needs_gmail(item) and result["status"] != "expired":
+            result["next_actions"] = []
+        if principal.kind == "assistant":
+            origin = get_settings().public_web_url.rstrip("/")
+            for step in [*result["next_actions"], result["connection"] or {}]:
+                if "owner_url" in step:
+                    step["owner_url"] = origin + step["owner_url"]
+        result["guidance"] = setup_guidance.view(_org(session, principal), item, result)
     return result
 
 
 def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idempotency_key: str) -> dict[str, Any]:
     _owner(principal)
-    if intent != "business_launch" or not 8 <= len(idempotency_key) <= 200:
+    if intent != "business_launch":
+        raise validation_failed("Use a supported setup intent.")
+    return _start(principal, intent, launch_plan_id, idempotency_key)
+
+
+def start_guided(principal: Principal, intent: setup_guidance.GuidedIntent, idempotency_key: str) -> dict[str, Any]:
+    _guided_owner(principal, "plans:write")
+    if intent not in setup_guidance.GUIDED_INTENTS:
+        raise validation_failed("Choose whether to start a business or hand off an existing workflow.")
+    return _start(principal, intent, None, idempotency_key)
+
+
+def _start(principal: Principal, intent: str, launch_plan_id: str | None, idempotency_key: str) -> dict[str, Any]:
+    if not 8 <= len(idempotency_key) <= 200:
         raise validation_failed("Use a supported setup intent and a valid idempotency key.")
     key_hash = fingerprint({"owner": principal.user_id, "key": idempotency_key})
     request_hash = fingerprint({"intent": intent, "launch_plan_id": launch_plan_id})
@@ -169,7 +210,90 @@ def start(principal: Principal, *, intent: str, launch_plan_id: str | None, idem
         org.setup_sessions = records
         audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.created", actor=principal,
                      resource_type="setup_session", resource_id=item["id"], data={"intent": intent})
-        return _view(item)
+        return _render(session, item, principal)
+
+
+def get_guided(principal: Principal, setup_id: str) -> dict[str, Any]:
+    _guided_owner(principal, "plans:read")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        item = _guided_item(_org(session, principal), setup_id, principal)
+        return _render(session, item, principal)
+
+
+def list_guided(principal: Principal) -> list[dict[str, Any]]:
+    _guided_owner(principal, "plans:read")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        records = [item for item in _org(session, principal).setup_sessions.values()
+                   if item["created_by"] == principal.user_id and item["intent"] in setup_guidance.GUIDED_INTENTS]
+        keys = ("id", "intent", "version", "created_at", "expires_at", "workflow_artifact")
+        return [{key: item.get(key) for key in keys} | {"expired": _expiry(item) <= utcnow()}
+                for item in sorted(records, key=lambda row: row["created_at"], reverse=True)]
+
+
+def answer_guided(principal: Principal, setup_id: str, question_id: str, answer: str, expected_version: int) -> dict[str, Any]:
+    _guided_owner(principal, "plans:write")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = _org(session, principal, lock=True)
+        item = _guided_item(org, setup_id, principal, active=True)
+        answers = item.get("answers", {})
+        questions = setup_guidance.questions(item["intent"], answers)
+        pending = next((q.id for q in questions if q.id not in answers), None)
+        question = next((q for q in questions if q.id == question_id), None)
+        if question is None or (question_id not in answers and question_id != pending):
+            raise validation_failed("Answer the current question or correct an earlier answer.")
+        value = setup_guidance.validate_answer(question, answer)
+        if answers.get(question_id) == value:
+            return _render(session, item, principal)
+        if item["version"] != expected_version:
+            raise conflict_version(item["version"])
+        if item.get("workflow_artifact"):
+            raise conflict("Start a new setup to revise this linked draft's intake.")
+        if question_id in {"process", "intake_channel"} and (item["connection_session_id"] or item.get("reused_connection_id")):
+            raise conflict("Start a new setup to change the process or channel after selecting an account.")
+        if question_id == "process" and question_id in answers:
+            answers = {}
+        answers[question_id] = value
+        if question_id == "supplier_decision" and value != "already_chosen":
+            answers.pop("supplier_name", None)
+        item.update(answers=answers, version=item["version"] + 1)
+        org.setup_sessions = {**org.setup_sessions, setup_id: item}
+        audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.answer_recorded",
+                     actor=principal, resource_type="setup_session", resource_id=setup_id, data={"question": question_id})
+        return _render(session, item, principal)
+
+
+def link_guided_draft(principal: Principal, setup_id: str, draft_id: str, expected_version: int) -> dict[str, Any]:
+    _guided_owner(principal, "plans:write")
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        org = _org(session, principal, lock=True)
+        item = _guided_item(org, setup_id, principal, active=True)
+        if item.get("workflow_artifact", {}).get("id") == draft_id:
+            return _render(session, item, principal)
+        if item["version"] != expected_version:
+            raise conflict_version(item["version"])
+        if _render(session, item, principal)["guidance"]["status"] != "ready_to_draft":
+            raise conflict("Finish the intake and required connection checks before linking a draft.")
+        if item["intent"] == "start_business":
+            draft = session.get(LaunchPlan, draft_id)
+            kind = "launch_plan"
+            if draft is not None and draft.state.get("started"):
+                raise conflict("Link a launch plan before starting it.")
+        else:
+            draft = session.get(Automation, draft_id)
+            kind = "automation"
+            if draft is not None and draft.skill_id != setup_guidance.automation_skill(item):
+                raise validation_failed("Use the automation skill suggested for this workflow.")
+            if draft is not None and (draft.status != "ready" or draft.current_policy_id is not None):
+                raise conflict("Link a fresh automation draft before starting a trial or signing a policy.")
+        if draft is None:
+            raise not_found("Workflow draft")
+        item.update(workflow_artifact={"kind": kind, "id": draft.id}, version=item["version"] + 1)
+        if kind == "launch_plan":
+            item["launch_plan_id"] = draft.id
+        org.setup_sessions = {**org.setup_sessions, setup_id: item}
+        audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.draft_linked",
+                     actor=principal, resource_type="setup_session", resource_id=setup_id, data={"draft_kind": kind, "draft_id": draft.id})
+        return _render(session, item, principal)
 
 
 def get(principal: Principal, setup_id: str) -> dict[str, Any]:
@@ -226,6 +350,13 @@ def remove_expired(principal: Principal, setup_id: str, expected_version: int) -
         return {"id": setup_id, "removed": True, "notice": "Provider accounts and completed actions are unchanged."}
 
 
+def _check_guided_connection(item: dict[str, Any], provider: str, scopes: set[str]) -> None:
+    if item["intent"] in setup_guidance.GUIDED_INTENTS and (
+        not setup_guidance.needs_gmail(item) or provider != "gmail" or google.READ_SCOPE not in scopes
+    ):
+        raise validation_failed("Choose Gmail order intake and request read access for this workflow setup.")
+
+
 def attach_connection(principal: Principal, setup_id: str, connection_session_id: str, expected_version: int) -> dict[str, Any]:
     _owner(principal)
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
@@ -237,6 +368,7 @@ def attach_connection(principal: Principal, setup_id: str, connection_session_id
         if (connection is None or connection.initiated_by != principal.user_id
                 or (item["launch_plan_id"] and connection.automation_plan_id != item["launch_plan_id"])):
             raise not_found("Connection session")
+        _check_guided_connection(item, connection.provider, _required_scopes(connection))
         if item.get("reused_connection_id") or item["connection_session_id"] not in (None, connection.id):
             raise conflict("This setup already references a different connection session.")
         item.update(connection_session_id=connection.id, reused_connection_id=None, reused_capabilities=[])
@@ -250,14 +382,18 @@ def attach_connection(principal: Principal, setup_id: str, connection_session_id
 
 
 def reuse_connection(principal: Principal, setup_id: str, *, connection_id: str, capabilities: list[str],
-                     expected_version: int) -> dict[str, Any]:
+                     expected_version: int, guided: bool = False) -> dict[str, Any]:
     """Bind only an owner-selected, confirmed and recently verified Gmail account."""
-    _owner(principal)
+    if guided:
+        _guided_owner(principal, "connections:manage")
+    else:
+        _owner(principal)
     scopes = set(google.scopes_for(capabilities))
     required = {scope for scope in scopes if scope.startswith("https://www.googleapis.com/auth/gmail.")}
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         org = _org(session, principal, lock=True)
-        item = _item(org, setup_id, principal, active=True)
+        item = _guided_item(org, setup_id, principal, active=True) if guided else _item(org, setup_id, principal, active=True)
+        _check_guided_connection(item, "gmail", required)
         if (item.get("reused_connection_id") == connection_id
                 and item.get("reused_capabilities") == sorted(set(capabilities))):
             return _render(session, item, principal)
@@ -279,8 +415,11 @@ def reuse_connection(principal: Principal, setup_id: str, *, connection_id: str,
 
 
 def request_connection(principal: Principal, setup_id: str, *, provider: str, capabilities: list[str],
-                       expected_version: int, idempotency_key: str) -> dict[str, Any]:
-    _owner(principal)
+                       expected_version: int, idempotency_key: str, guided: bool = False) -> dict[str, Any]:
+    if guided:
+        _guided_owner(principal, "connections:manage")
+    else:
+        _owner(principal)
     if provider != "gmail" or not 8 <= len(idempotency_key) <= 200:
         raise validation_failed("Choose the supported Gmail handoff and a valid idempotency key.")
     requested_scopes = set(google.scopes_for(capabilities))
@@ -289,7 +428,8 @@ def request_connection(principal: Principal, setup_id: str, *, provider: str, ca
     key_hash = fingerprint({"owner": principal.user_id, "key": idempotency_key})
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         org = _org(session, principal, lock=True)
-        item = _item(org, setup_id, principal, active=True)
+        item = _guided_item(org, setup_id, principal, active=True) if guided else _item(org, setup_id, principal, active=True)
+        _check_guided_connection(item, provider, requested_gmail_scopes)
         existing = _connection(session, item, principal)
         if item.get("connection_key_hash") == key_hash:
             if item.get("connection_request_hash") != request_hash:

@@ -153,6 +153,36 @@
   - apps/api/src/gluons/api/routes/chat.py
   tests:
   - apps/api/tests/test_chat_fallback.py
+- id: AG-09
+  source: EX-05
+  requirement: Resumable chat intake with per-decision preferences, a scoped provider handoff and an order-entry shadow case
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/setup_guidance.py
+  - apps/api/src/gluons/setup_sessions.py
+  - apps/api/src/gluons/mcp/server.py
+  - apps/api/src/gluons/runtime/lifecycle.py
+  tests:
+  - apps/api/tests/test_mcp_tools_contract.py::test_launch_intake_reuses_confirmed_passport_and_links_draft_without_authority
+  - apps/api/tests/test_mcp_tools_contract.py::test_workflow_answers_check_scope_version_tenant_and_relevant_questions
+  - apps/api/tests/test_mcp_tools_contract.py::test_chat_gmail_handoff_is_scoped_and_resumable_without_provider_access
+  - apps/api/tests/test_mcp_tools_contract.py::test_chat_order_draft_runs_only_a_shadow_case_and_can_be_monitored_and_paused
+  blocker: Live assistant and real provider acceptance are pending.
+- id: AG-10
+  source: EX-05
+  requirement: Chat-first inventory reorder trial with saved rules and supplier-grouped drafts
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/skills/domain/reorder.py
+  - packages/skills/inventory_reorder/contract.yaml
+  - apps/api/src/gluons/mcp/server.py
+  tests:
+  - apps/api/tests/test_inventory_reorder.py::test_reorder_reference_case
+  - apps/api/tests/test_inventory_reorder.py::test_reorder_run_keeps_the_rules_captured_at_submission
+  - apps/api/tests/test_mcp_tools_contract.py::test_chat_reorder_uses_saved_rules_and_groups_only_reviewable_lines
+  blocker: The live inventory source and purchase order provider still need a selected pilot, approved access and provider proof.
 - id: CN-01
   source: doc13
   requirement: One-time connection sessions with state PKCE expiry
@@ -784,7 +814,7 @@
   - infra/terraform/environments/staging/main.tf
   - infra/terraform/modules/gluons_stack/main.tf
   tests: []
-  blocker: Owner approval for chargeable Google Cloud provisioning.
+  blocker: Credit-limited staging validated and planned against the live state backend on November 24, 2026. Owner approval of the exact plan and hosted apply evidence are pending.
 - id: IN-02
   source: doc07
   requirement: Docker images and Compose

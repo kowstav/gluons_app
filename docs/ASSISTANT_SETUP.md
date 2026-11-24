@@ -49,3 +49,8 @@ revoking the conversational client does not silently change business policy.
 The implementation has local PostgreSQL and official SDK protocol tests. It has
 not been installed into a live Claude/ChatGPT account or verified through a real
 provider. No claim of host certification or production readiness is made.
+
+An owner can start a guided workflow from chat. The first two entry points are
+starting an online business and handing off an existing process. See the
+[chat-first setup guide](execution/EX05_CHAT_FIRST_SETUP.md) for the question,
+provider handoff, draft, and shadow trial flow.

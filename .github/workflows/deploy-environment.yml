@@ -16,6 +16,9 @@ on:
       canary_percent:
         type: number
         required: true
+      images_only:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,6 +33,8 @@ jobs:
       contents: read
       id-token: write
     env:
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.GCP_REGION }}
       PREFIX: ${{ vars.GLUONS_PREFIX }}
       REPOSITORY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GLUONS_PREFIX }}
@@ -54,6 +59,7 @@ jobs:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build and push the API image
+        id: api_image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -63,6 +69,7 @@ jobs:
 
       # NEXT_PUBLIC_API_URL is compiled in, so each environment gets its own web image.
       - name: Build and push the web image
+        id: web_image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -71,6 +78,7 @@ jobs:
           tags: ${{ env.REPOSITORY }}/web:${{ env.TAG }}
           build-args: |
             NEXT_PUBLIC_API_URL=${{ env.PUBLIC_API_URL }}
+            NEXT_PUBLIC_SAME_ORIGIN_API=${{ inputs.environment == 'staging' && endsWith(vars.GLUONS_PUBLIC_WEB_URL, '.run.app') }}
 
       - name: Scan the pushed API image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -80,46 +88,36 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
+      - name: Scan the pushed web image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REPOSITORY }}/web:${{ env.TAG }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Record scanned image digests
+        env:
+          API_DIGEST: ${{ steps.api_image.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web_image.outputs.digest }}
+        run: |
+          {
+            echo '### Scanned images'
+            printf '\n- API: `%s/api@%s`\n- Web: `%s/web@%s`\n' "$REPOSITORY" "$API_DIGEST" "$REPOSITORY" "$WEB_DIGEST"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Migrate
+        if: ${{ !inputs.images_only }}
         run: |
           gcloud run jobs update "${PREFIX}-migrate" --region "$REGION" --image "${REPOSITORY}/api:${TAG}"
           gcloud run jobs execute "${PREFIX}-migrate" --region "$REGION" --wait
 
       - name: Sync skills
+        if: ${{ !inputs.images_only }}
         run: |
           gcloud run jobs update "${PREFIX}-skills" --region "$REGION" --image "${REPOSITORY}/api:${TAG}"
           gcloud run jobs execute "${PREFIX}-skills" --region "$REGION" --wait
 
-      - name: Roll out new revisions with no traffic
-        run: |
-          for service in worker webhooks mcp api; do
-            gcloud run services update "${PREFIX}-${service}" --region "$REGION" \
-              --image "${REPOSITORY}/api:${TAG}" --no-traffic --tag candidate
-          done
-          gcloud run services update "${PREFIX}-web" --region "$REGION" \
-            --image "${REPOSITORY}/web:${TAG}" --no-traffic --tag candidate
-
-      - name: Send canary traffic
-        run: |
-          for service in worker webhooks mcp api web; do
-            gcloud run services update-traffic "${PREFIX}-${service}" --region "$REGION" \
-              --to-tags "candidate=${CANARY_PERCENT}"
-          done
-
-      - name: Smoke test the public endpoints
-        run: |
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl --fail --silent --show-error --max-time 10 "${PUBLIC_API_URL}/ready" \
-              && curl --fail --silent --show-error --max-time 10 --output /dev/null "${PUBLIC_WEB_URL}/"; then
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Smoke test failed. Traffic stays where it is. See docs/runbooks/deploy-and-rollback.md"
-          exit 1
-
-      - name: Move all traffic to the new revisions
-        run: |
-          for service in worker webhooks mcp api web; do
-            gcloud run services update-traffic "${PREFIX}-${service}" --region "$REGION" --to-latest
-          done
+      - name: Shift traffic to ready revisions and restore it on failure
+        if: ${{ !inputs.images_only }}
+        run: python3 scripts/cloud_run_rollout.py

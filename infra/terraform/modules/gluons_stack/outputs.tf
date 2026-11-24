@@ -7,6 +7,9 @@ output "secret_ids" { value = module.security.secret_ids }
 output "service_accounts" { value = module.identities.emails }
 output "backend_urls" { value = module.services.backend_urls }
 output "web_service" { value = module.services.web_url }
+output "public_origins" {
+  value = { api = local.api_url, web = local.web_url }
+}
 output "edge_ip_address" {
   value = local.load_balancer_on ? module.edge[0].ip_address : null
 }

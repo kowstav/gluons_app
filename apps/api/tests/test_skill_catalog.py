@@ -5,6 +5,7 @@ the order vertical's separate HTTP simulator tests, never by these fixtures.
 """
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
@@ -24,12 +25,15 @@ from gluons.skills.domain.drafts import compare_quotes, inventory, prepare, reco
 from gluons.skills.evaluations import preparation_suite
 from gluons.skills.registry import SkillValidationError, get_registry, validate
 
-SLUGS = sorted(path.parent.name for path in (Path(__file__).resolve().parents[3] / "packages" / "skills").glob("*/contract.yaml") if path.parent.name != "multichannel_order_entry")
+BLUEPRINT_CATALOG = Path(__file__).resolve().parents[3] / "gluons_blueprint" / "skills" / "catalog.json"
+BLUEPRINT_SLUGS = {entry["id"] for entry in json.loads(BLUEPRINT_CATALOG.read_text(encoding="utf-8"))}
+SLUGS = sorted(BLUEPRINT_SLUGS - {"multichannel_order_entry"})
 
 
 def test_all_31_blueprint_skills_registered_and_typed():
     registry = get_registry()
-    assert len(registry) == 31
+    assert len(BLUEPRINT_SLUGS) == 31
+    assert set(registry.ids()) == BLUEPRINT_SLUGS | {"inventory_reorder"}
     assert len(SLUGS) == 30
     for skill in registry.all():
         Draft202012Validator.check_schema(skill.contract.inputs)

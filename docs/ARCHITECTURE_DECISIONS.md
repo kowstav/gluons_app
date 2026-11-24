@@ -1,5 +1,9 @@
 # Architecture decisions
 
+## ADR-033 Credit-limited staging
+
+An opt-in staging profile uses zonal shared-core Cloud SQL with a fixed 10 GiB disk and native Cloud Run HTTPS origins. Run a short validation window and verify teardown of disposable resources. Keep the private database, forced tenant RLS, worker IAM, and staging-only GitHub federation. Production retains its existing infrastructure settings. Verify client address attribution on the direct HTTPS route before testing sign-in limits. [Deployment runbook](runbooks/deployment.md)
+
 ## ADR-022 Cloud SQL-compatible worker authority (supersedes ADR-003 role attribute)
 Cloud SQL does not expose PostgreSQL superusers, and PostgreSQL requires a superuser
 to grant BYPASSRLS. Fresh migration 0002 creates the system role without this
@@ -119,3 +123,17 @@ A deletion request closes access at once. After `GLUONS_DELETION_GRACE_DAYS` (de
 ## ADR-030 Isolated Gmail self-proof
 
 The first provider proof uses a test-only skill and action in an explicitly enabled local environment with a loopback database and isolated skill catalog. It follows the existing gateway, signed policy, owner approval, receipt, and Gmail readback boundaries. The fixed synthetic message can go only to the confirmed account, with a narrowly scoped policy expiring within 24 hours and a stable automation-wide idempotency key. Authority and connection state are rechecked under database locks immediately before the write; an uncertain outcome is reconciled instead of blindly resent. The test fixture does not change the historical blueprint or establish production readiness, delivery, or a real-provider result. Real execution requires separate owner authorization and private evidence.
+
+## ADR-031 Chat-first workflow setup
+
+Use the existing MCP tools for independent capabilities and the existing setup session for conversation progress. Gluons returns the next question, allowed answers, relevant Passport suggestions, and existing tool names to the assistant. A new business and an existing process use different questions. Decision preferences are planning input. Connection grants, signed policies, and payment approvals remain separate.
+
+Guided sessions use the current tenant, creating owner, 30-day deadline, version checks, and setup session export and purge paths. An assistant with the same authenticated owner and business can reopen the session within its OAuth scopes. The projection discloses only confirmed selling-region suggestions from the Passport. Contact information, full transcripts, credentials, and raw provider responses are outside this intake. Typed questions and bounded answers are revisable before linking a draft. Audit events name the question without the answer.
+
+The first executable handoff uses the existing order-entry graph. Gmail setup reuses the existing confirmed-account and OAuth handoffs with read-only intake scopes. The owner reviews mailbox ingestion separately. Launch setup links the existing launch plan. Unsupported requests can be retained as planning notes with an explicit execution blocker. A synthetic order case can enter the existing queue only while the order automation is in replay or shadow mode, checked under the automation's row lock. General composition, passwordless sign-in, and hosted provider acceptance are separate work.
+
+## ADR-032 Inventory reorder trials
+
+Register the generic reorder review as a first-party playbook beside its contract. The historical catalog and its 31 entries remain intact. Use the existing trial and run queue, with a stock evaluation step followed by supplier grouping. Rules use one stock location and currency per automation. The run captures a copy of the rules at submission so delayed execution and retries use the same inputs.
+
+The contract is draft-only and declares zero provider actions. The report identifies supplied stock and configured cost estimates. Business details live in the run and its owner export. The retained completion event records status without copying the report. Deletion uses the existing automation and run scrubbing rules. A future purchase workflow requires a chosen source and purchasing system, scoped access, owner approval and a matching provider readback.

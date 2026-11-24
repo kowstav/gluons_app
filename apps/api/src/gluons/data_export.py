@@ -8,11 +8,13 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, tuple_
+from pydantic import ValidationError
+from sqlalchemy import case, select, tuple_
 
 from gluons import audit
 from gluons.authz import Principal, Role
@@ -20,6 +22,8 @@ from gluons.config import get_settings
 from gluons.core import GluonsError, canonical_json, constant_time_equals, forbidden, hmac_sha256_hex, utcnow, validation_failed
 from gluons.db import models as m
 from gluons.db.session import tenant_tx
+from gluons.skills.domain.reorder import SKILL_ID as REORDER_SKILL
+from gluons.skills.domain.reorder import ReorderRules, StockSnapshot
 
 # Dataset -> (model, ordered timestamp, explicitly exported columns). No global
 # identity table, credential/session table, or arbitrary metadata is reachable.
@@ -51,11 +55,12 @@ DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
     "supplier_quotes": (m.SupplierQuote, "created_at", ("id", "supplier_id", "product", "unit_cost_minor", "currency", "moq", "lead_time_days", "shipping_minor", "duties_minor", "status", "created_at")),
     "audit": (m.AuditEvent, "created_at", ("id", "seq", "category", "event_type", "actor_kind", "actor_id", "resource_type", "resource_id", "decision", "prev_hash", "hash", "created_at")),
 }
+OPTIONAL_COLUMNS = {"automations": ("inventory_rules",), "runs": ("inventory_rules", "inventory_snapshot", "reorder_review")}
 MAX_PAGE_BYTES = 4 * 1024 * 1024
 MAX_RECORD_BYTES = 512 * 1024
 LIMITATIONS = [
     "Structured allowlisted records only; credentials, authentication sessions, OAuth state, signatures, internal storage locators and arbitrary metadata are excluded. Setup sessions are exported as sanitized summaries.",
-    "Raw message/document/transcript bodies, order-line JSON, runtime inputs/outputs and provider responses are excluded; retrieve separately through authorized retention-aware workflows.",
+    "Raw message/document/transcript bodies, order-line JSON, generic runtime inputs/outputs and provider responses are excluded. Typed inventory rules, snapshots and reorder reviews are included.",
     "The cursor fixes a creation-time cutoff where recorded, not a cross-request database snapshot; records may change during pagination. Catalog rows have no creation timestamp and use stable ID ordering.",
     "No data or account is deleted by an export.",
 ]
@@ -70,7 +75,8 @@ def _owner(principal: Principal) -> None:
 def manifest(principal: Principal) -> dict:
     _owner(principal)
     return {"format": "gluons.structured-export.v1", "tenant_id": principal.tenant_id, "max_page_size": 1000,
-            "datasets": [{"name": name, "columns": list(columns)} for name, (_, _, columns) in DATASETS.items()],
+            "datasets": [{"name": name, "columns": [*columns, *OPTIONAL_COLUMNS.get(name, ())]}
+                         for name, (_, _, columns) in DATASETS.items()],
             "limitations": LIMITATIONS}
 
 
@@ -115,6 +121,27 @@ def _value(value: Any) -> Any:
     return value
 
 
+def _inventory_export(dataset: str, row: Mapping[str, Any]) -> dict[str, Any]:
+    if row["skill_id"] != REORDER_SKILL:
+        return {}
+    result: dict[str, Any] = {}
+    try:
+        result["inventory_rules"] = ReorderRules.model_validate(row["_inventory_rules"]).model_dump(mode="json")
+    except ValidationError:
+        pass
+    if dataset == "runs":
+        try:
+            result["inventory_snapshot"] = StockSnapshot.model_validate(row["_inventory_snapshot"]).model_dump(mode="json")
+        except ValidationError:
+            pass
+        review = row["_reorder_review"]
+        if isinstance(review, dict):
+            keys = ("rows", "drafts", "currency", "basis", "stock_location", "observed_at", "ignored_skus",
+                    "cost_basis", "items_needing_review", "external_actions_performed")
+            result["reorder_review"] = {key: review[key] for key in keys if key in review}
+    return result
+
+
 def export_page(principal: Principal, dataset: str, *, cursor: str | None = None, limit: int = 200) -> dict:
     _owner(principal)
     if dataset not in DATASETS:
@@ -134,6 +161,14 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
     epoch = literal(datetime(1970, 1, 1, tzinfo=UTC), type_=DateTime(timezone=True))
     timestamp = func.coalesce(getattr(model, timestamp_name), epoch) if timestamp_name else epoch
     query = select(*(getattr(model, column) for column in columns), timestamp.label("_sort_timestamp"))
+    if dataset == "automations":
+        query = query.add_columns(m.Automation.config["inventory_rules"].label("_inventory_rules"))
+    if dataset == "runs":
+        query = query.add_columns(
+            m.Run.state["inventory_rules"].label("_inventory_rules"),
+            case((m.Run.skill_id == REORDER_SKILL, m.Run.input)).label("_inventory_snapshot"),
+            m.Run.outcome["reorder_review"].label("_reorder_review"),
+        )
     # RLS is still mandatory, but organizations/memberships also have deliberate
     # self-membership visibility for business selection. Explicitly narrow those
     # authorized views so a selected-business export never mixes owner businesses.
@@ -156,7 +191,13 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
             if dataset == "setup_sessions":
                 keys = ("id", "intent", "launch_plan_id", "status", "version", "created_at", "expires_at", "created_by",
                         "connection_session_id", "reused_connection_id", "reused_capabilities")
-                record["setup_sessions"] = [{key: item.get(key) for key in keys} for item in row["setup_sessions"].values()]
+                record["setup_sessions"] = [
+                    {key: item.get(key) for key in keys} |
+                    {key: item[key] for key in ("answers", "workflow_artifact") if key in item}
+                    for item in row["setup_sessions"].values()
+                ]
+            if dataset in {"automations", "runs"}:
+                record.update(_inventory_export(dataset, row))
             record_bytes = len(canonical_json(record).encode())
             if record_bytes > MAX_RECORD_BYTES:
                 raise GluonsError("EXPORT_RECORD_TOO_LARGE", "A structured record exceeds the export safety limit; request administrator-assisted review.", status=422,

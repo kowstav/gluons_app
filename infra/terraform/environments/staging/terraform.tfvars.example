@@ -3,6 +3,7 @@
 project_id      = "your-gluons-staging-project"
 region          = "us-central1"
 deploy_services = false
+# credit_limited_pilot = true  # us-central1 and Cloud Run HTTPS origins
 # billing_account      = "000000-000000-000000"
 # alert_email          = "oncall@your-domain.example"
 # github_repository    = "your-org/gluons"

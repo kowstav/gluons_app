@@ -30,7 +30,9 @@ state, browser sessions/cookies, password/MFA secrets, signing signatures,
 provider request/response JSON, connection metadata, automation configuration,
 runtime inputs/outputs and internal artifact storage locators. Raw document,
 email and transcript bodies and order-line JSON are excluded from this safe
-structured export. Retrieval of raw contents must use separate authenticated,
+structured export. The inventory reorder playbook adds typed item rules, supplied
+stock snapshots and generated reorder reviews to its respective automation and run
+records. Retrieval of raw contents must use separate authenticated,
 retention-aware business workflows; this endpoint is not a byte-for-byte account
 backup. Owner-supplied business names/addresses remain owner data and are private.
 
