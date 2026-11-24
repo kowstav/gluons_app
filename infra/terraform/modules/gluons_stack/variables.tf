@@ -102,6 +102,11 @@ variable "database_disk_autoresize" {
   default = true
 }
 
+variable "database_activation_policy" {
+  type    = string
+  default = "ALWAYS"
+}
+
 variable "backup_retained_count" {
   type    = number
   default = 14

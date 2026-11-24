@@ -87,6 +87,7 @@ module "database" {
   high_availability     = var.database_high_availability
   disk_size_gb          = var.database_disk_size_gb
   disk_autoresize       = var.database_disk_autoresize
+  activation_policy     = var.database_activation_policy
   backup_retained_count = var.backup_retained_count
   log_retention_days    = var.log_retention_days
   deletion_protection   = var.deletion_protection

@@ -1,8 +1,12 @@
 # Deployment status
 
-## Credit-limited staging plan on November 24, 2026
+## Credit-limited staging pilot on November 24, 2026
 
-Read-only Google Cloud checks confirmed the staging account's bootstrap and federation permissions and access to the versioned Terraform state bucket. Terraform validated dev, staging, and production. The live-state plan proposed 183 foundation additions and a service preview proposed 203 total additions. Both proposed zero modifications or deletions. The service preview used placeholder image tags. It verified scale-to-zero settings, private worker IAM, and a paused scheduler. The foundation uses a private `db-g1-small` with a fixed 10 GiB SSD. Approval of the exact low-cost plan and image evidence are pending. No cloud resources were applied. [Deployment runbook](runbooks/deployment.md#credit-limited-staging-pilot)
+The approved pilot provisioned a private `db-g1-small` with a fixed 10 GiB SSD, a scoped GitHub federation identity, scale-to-zero Cloud Run services, and a private worker. Cloud SQL rejected the first retention settings. The corrected retry used two backups and two days of transaction logs and completed the eight remaining foundation resources. [Retention correction](https://github.com/kowstav/gluons_app/pull/16) · [Deployment runbook](runbooks/deployment.md#credit-limited-staging-pilot)
+
+GitHub passed CI on the app release commit and built and scanned both published staging images. Terraform deployed their immutable digests. On Cloud Run, the PostgreSQL migration and skill synchronization jobs each succeeded. Hosted checks passed for PostgreSQL readiness, OAuth discovery, the MCP authorization boundary, and the same-origin web session route. One authenticated worker wake succeeded, and the recurring schedule was paused afterward. An automated backup was successful. The pilot database was stopped and its `NEVER` activation policy verified. [Release CI](https://github.com/kowstav/gluons_app/actions/runs/45351947684) · [Staging image scans](https://github.com/kowstav/gluons_app/actions/runs/45354270489)
+
+Live owner sign-in delivery, an assistant authorization through a real host, a consenting business workflow with provider readback, alert delivery, and an isolated restore remain unverified. Production was outside the approved staging pilot.
 
 ## Release candidate check on November 21, 2026
 

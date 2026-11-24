@@ -53,6 +53,11 @@ variable "credit_limited_pilot" {
     error_message = "The credit-limited pilot requires us-central1, Cloud Run origins, owner-managed budgets, and IAM on the private worker."
   }
 }
+variable "pilot_database_running" {
+  type        = bool
+  default     = false
+  description = "Start the credit-limited staging database for an approved pilot window."
+}
 variable "plain_env" {
   type    = map(string)
   default = {}
@@ -102,6 +107,7 @@ module "gluons" {
   database_high_availability = false
   database_disk_size_gb      = var.credit_limited_pilot ? 10 : 20
   database_disk_autoresize   = !var.credit_limited_pilot
+  database_activation_policy = var.credit_limited_pilot && !var.pilot_database_running ? "NEVER" : "ALWAYS"
   backup_retained_count      = var.credit_limited_pilot ? 2 : 14
   log_retention_days         = var.credit_limited_pilot ? 2 : 7
   deletion_protection        = true

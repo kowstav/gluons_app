@@ -21,6 +21,7 @@ variable "tier" { type = string }
 variable "high_availability" { type = bool }
 variable "disk_size_gb" { type = number }
 variable "disk_autoresize" { type = bool }
+variable "activation_policy" { type = string }
 variable "backup_retained_count" { type = number }
 variable "log_retention_days" {
   type        = number
@@ -41,6 +42,7 @@ resource "google_sql_database_instance" "main" {
     tier                        = var.tier
     availability_type           = var.high_availability ? "REGIONAL" : "ZONAL"
     disk_autoresize             = var.disk_autoresize
+    activation_policy           = var.activation_policy
     disk_size                   = var.disk_size_gb
     deletion_protection_enabled = var.deletion_protection
 
