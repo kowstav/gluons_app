@@ -1,5 +1,11 @@
 # Architecture decisions
 
+## ADR-035 Passkey verification for unattended spending
+
+An owner grants an unattended spending allowance by reviewing one exact policy and verifying a passkey on the Gluons web origin. Require an eligible amount-bearing action, an explicit connection, and per-action and monthly limits. The gateway checks currency as well as the limits. The WebAuthn challenge binds the user's session to the policy fingerprint. Gluons consumes it in the same transaction as the signed policy. The assistant can request a change and link the owner to review. Policy approval and activation remain separate actions.
+
+Hosted passkeys require an explicitly configured HTTPS origin equal to the owner web URL. Initial enrollment requires recent sign-in and completed TOTP where enrolled. A second enrollment cannot replace a registered credential. An owner can still revoke a policy after losing their passkey. Device recovery and real-device hosted acceptance remain open.
+
 ## ADR-034 Owner sign-in by email code
 
 The owner page defaults to a short-lived email code. The code works in the browser that requested it and has five verification attempts. PostgreSQL stores keyed proofs with forced row access and purges expired challenges through existing housekeeping. New accounts are created after mailbox verification, and existing accounts keep their memberships and enrolled TOTP. The browser uses the standard session issuer. A code provides account sign-in. Spending and policy approvals keep their separate authorization requirements.

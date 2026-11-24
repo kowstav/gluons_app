@@ -6,13 +6,14 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import AwareDatetime, BaseModel, Field
 
-from gluons import policy, tasks
+from gluons import audit, passkeys, policy, tasks
+from gluons.actions import get_action
 from gluons.api.deps import IdempotencyKey, PrincipalDep, SessionDep, idempotent
-from gluons.core import not_found
+from gluons.core import GluonsError, auth_required, conflict, not_found, validation_failed
 from gluons.db.models import AutomationPolicy, Plan
 from gluons.db.session import tenant_tx
 from gluons.runtime import engine, lifecycle
-from gluons.skills import catalog
+from gluons.skills import catalog, registry
 
 router = APIRouter(prefix="/v1", tags=["automations"])
 
@@ -236,6 +237,20 @@ def diagnosis(run_id: str, principal: PrincipalDep) -> dict[str, Any]:
 
 @router.post("/automation-policies", status_code=201)
 def propose_policy(automation_id: str, body: PolicyProposal, principal: PrincipalDep) -> dict[str, Any]:
+    principal.require("policies:write")
+    if body.auto_limits:
+        registry.get_registry()
+    for action, allowance in body.auto_limits.items():
+        if action == "dual_control" and isinstance(allowance, bool):
+            continue
+        spec = get_action(action)
+        ceiling = allowance.get("max_amount_minor") if isinstance(allowance, dict) else None
+        if (body.mode != "live" or not body.connection_ids or spec is None or not spec.is_write or spec.risk_tier != "R3"
+                or spec.amount_minor is None or "currency" not in spec.input_model.model_fields
+                or action not in body.allowed_actions or action in body.requires_approval_for
+                or spec.permission in body.requires_approval_for or type(ceiling) is not int or ceiling <= 0
+                or body.spend_limit_minor_per_month is None or body.spend_limit_minor_per_month <= 0):
+            raise validation_failed("An unattended spending allowance needs an eligible live action, a named connection, and positive per-action and monthly limits.")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         return policy.serialize(policy.propose(session, principal, automation_id, body.model_dump()))
 
@@ -254,9 +269,28 @@ def list_policies(automation_id: str, principal: PrincipalDep) -> dict[str, Any]
         return {"policies": [policy.serialize(p) for p in rows]}
 
 
-@router.post("/automation-policies/{policy_id}/sign")
-def sign_policy(policy_id: str, principal: PrincipalDep) -> dict[str, Any]:
+@router.post("/automation-policies/{policy_id}/passkey-options")
+def sign_policy_options(policy_id: str, principal: PrincipalDep) -> dict[str, Any]:
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        draft = policy.owner_policy_draft(session, principal, policy_id)
+        if not policy.requires_spending_passkey(draft):
+            raise conflict("This policy does not require a spending passkey.")
+        if not principal.user_id or not principal.session_id:
+            raise auth_required()
+        return passkeys.begin_policy(session, principal.user_id, principal.session_id, policy.policy_challenge_hash(draft))
+
+
+@router.post("/automation-policies/{policy_id}/sign")
+def sign_policy(policy_id: str, principal: PrincipalDep, body: passkeys.Proof | None = None) -> dict[str, Any]:
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        draft = policy.owner_policy_draft(session, principal, policy_id)
+        if policy.requires_spending_passkey(draft):
+            if body is None or not principal.user_id or not principal.session_id:
+                raise GluonsError("PASSKEY_REQUIRED", "Verify this spending allowance with your passkey.", status=403)
+            passkeys.verify_policy(session, principal.user_id, principal.session_id, policy.policy_challenge_hash(draft), body)
+            audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="policy.passkey_verified",
+                         actor=principal, resource_type="automation_policy", resource_id=draft.id,
+                         data={"policy_version": draft.policy_version})
         return policy.serialize(policy.sign(session, principal, policy_id))
 
 

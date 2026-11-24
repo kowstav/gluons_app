@@ -26,6 +26,7 @@ from gluons.core import (
     canonical_json,
     conflict,
     constant_time_equals,
+    fingerprint,
     forbidden,
     hmac_sha256_hex,
     new_id,
@@ -68,6 +69,7 @@ class PolicyInput:
     resources: dict[str, Any] = field(default_factory=dict)
     pinned_policy_id: str | None = None
     skill_actions: tuple[str, ...] | None = None
+    amount_currency: str | None = None
 
 
 def deny(*reasons: str, policy: AutomationPolicy | None = None) -> Decision:
@@ -203,6 +205,8 @@ def evaluate(session: Session, request: PolicyInput) -> Decision:
 
     amount = request.amount_minor
     if amount is not None:
+        if request.amount_currency is not None and request.amount_currency != policy.currency:
+            return deny("POLICY_CURRENCY_MISMATCH", policy=policy)
         if policy.per_action_limit_minor is not None and amount > policy.per_action_limit_minor:
             return deny("PER_ACTION_LIMIT_EXCEEDED", policy=policy)
         if policy.spend_limit_minor_per_month is not None:
@@ -304,8 +308,7 @@ def propose(session: Session, principal: Principal, automation_id: str, spec: di
     return policy
 
 
-def sign(session: Session, principal: Principal, policy_id: str) -> AutomationPolicy:
-    """The owner's explicit grant. Reachable only from an authenticated web session."""
+def owner_policy_draft(session: Session, principal: Principal, policy_id: str) -> AutomationPolicy:
     principal.require("policies:sign")
     if principal.kind != "user" or principal.role != Role.OWNER:
         raise forbidden("Only an owner signed in to Gluons can grant this.")
@@ -314,6 +317,21 @@ def sign(session: Session, principal: Principal, policy_id: str) -> AutomationPo
         raise not_found("Policy")
     if policy.status != "proposed":
         raise conflict("This policy version has already been decided.")
+    return policy
+
+
+def requires_spending_passkey(policy: AutomationPolicy) -> bool:
+    return policy.mode == "live" and any(isinstance(limit, dict) and "max_amount_minor" in limit
+                                         for limit in policy.auto_limits.values())
+
+
+def policy_challenge_hash(policy: AutomationPolicy) -> str:
+    return fingerprint(_policy_document(policy))
+
+
+def sign(session: Session, principal: Principal, policy_id: str) -> AutomationPolicy:
+    """Persist the owner's grant after the browser route verifies any required passkey."""
+    policy = owner_policy_draft(session, principal, policy_id)
     policy.approved_by = principal.actor_id
     policy.approved_at = utcnow()
     if policy.expires_at is None:
@@ -382,6 +400,7 @@ def serialize(policy: AutomationPolicy) -> dict[str, Any]:
         "resource_filters": policy.resource_filters,
         "requires_approval_for": policy.requires_approval_for,
         "auto_limits": policy.auto_limits,
+        "requires_spending_passkey": requires_spending_passkey(policy),
         "spend_limit_minor_per_month": policy.spend_limit_minor_per_month,
         "per_action_limit_minor": policy.per_action_limit_minor,
         "currency": policy.currency,

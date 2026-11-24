@@ -17,5 +17,3 @@ grpcio-status==1.85.1
 opentelemetry-sdk==1.45.2
 opentelemetry-semantic-conventions==0.66b2
 proto-plus==1.29.0
-pyasn1==0.6.5
-pyasn1_modules==0.4.2

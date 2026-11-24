@@ -663,6 +663,7 @@
   - apps/web/src
   - apps/web/src/components/setup-room.tsx
   - apps/api/src/gluons/email_sign_in.py
+  - apps/api/src/gluons/passkeys.py
   tests:
   - apps/web/tests/owner-flow.spec.ts
   - apps/api/tests/test_email_sign_in.py

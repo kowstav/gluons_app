@@ -24,6 +24,7 @@ dependencies = [
   "jsonschema>=4.23,<5",
   "python-multipart>=0.0.12",
   "pyotp>=2.9,<3",
+  "webauthn==3.0.1",
 ]
 
 [project.optional-dependencies]
