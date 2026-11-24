@@ -14,5 +14,7 @@ deploy_services = false
 # plain_env = {
 #   GLUONS_GOOGLE_CLIENT_ID = "..."
 #   GLUONS_MAIL_FROM        = "Gluons <no-reply@your-domain.example>"
+#   GLUONS_MAIL_ALLOWED_RECIPIENTS = "owner@your-domain.example"
+#   GLUONS_PASSKEY_ORIGIN   = "https://app.staging.your-domain.example"
 # }
 # populated_secrets = ["smtp-url", "google-client-secret"]

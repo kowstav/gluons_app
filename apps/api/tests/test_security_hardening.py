@@ -145,6 +145,20 @@ def test_a_failed_send_stays_pending_and_later_rows_are_not_lost(world, monkeypa
     assert events.deliver_urgent() >= 1
 
 
+def test_pilot_notifications_reach_approved_owners_with_an_excluded_backlog(world, monkeypatch):
+    blocked_id = notify(world)
+    pilot = World.create("Staging mail pilot")
+    pilot_id = notify(pilot)
+    pilot_email = owner_email(pilot)
+    monkeypatch.setattr(get_settings(), "mail_allowed_recipients", pilot_email)
+    assert events.deliver_urgent(limit=1) == 1
+    assert [m for m in mail_for(owner_email(world)) if "Urgent" in m["subject"]] == []
+    assert len([m for m in mail_for(pilot_email) if "Urgent" in m["subject"]]) == 1
+    with system_tx() as session:
+        assert session.get(Notification, blocked_id).delivered_at is None
+        assert session.get(Notification, pilot_id).delivered_at is not None
+
+
 def test_message_and_order_lists_are_tenant_scoped_and_label_untrusted_text(world, erp):
     client = TestClient(create_app())
     assert client.get("/v1/messages").status_code == 401

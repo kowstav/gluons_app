@@ -57,10 +57,17 @@ def deliver_urgent(*, limit: int = 50) -> int:
     data beyond the notification text the owner would see in the app.
     """
     settings = get_settings()
+    allowed = mail.allowed_recipients()
+    eligible_owners = select(User.email).join(Membership, Membership.user_id == User.id).where(
+        Membership.role == "owner", Membership.removed_at.is_(None))
+    pending_query = select(Notification.id).where(
+        Notification.severity == "action", Notification.delivered_at.is_(None),
+        Notification.created_at > utcnow() - URGENT_WINDOW)
+    if allowed is not None:
+        eligible_owners = eligible_owners.where(User.email.in_(allowed))
+        pending_query = pending_query.where(Notification.tenant_id.in_(eligible_owners.with_only_columns(Membership.tenant_id)))
     with system_tx() as session:
-        pending = session.execute(select(Notification.id).where(
-            Notification.severity == "action", Notification.delivered_at.is_(None),
-            Notification.created_at > utcnow() - URGENT_WINDOW).order_by(Notification.created_at).limit(limit)).scalars().all()
+        pending = session.scalars(pending_query.order_by(Notification.created_at).limit(limit)).all()
     sent = 0
     for notification_id in pending:
         with system_tx() as session:
@@ -68,10 +75,11 @@ def deliver_urgent(*, limit: int = 50) -> int:
                                   .with_for_update(skip_locked=True)).scalar_one_or_none()
             if row is None:
                 continue
-            owners = session.execute(select(User.email).join(Membership, Membership.user_id == User.id).where(
-                Membership.tenant_id == row.tenant_id, Membership.role == "owner", Membership.removed_at.is_(None))).scalars().all()
+            recipients = session.scalars(eligible_owners.where(Membership.tenant_id == row.tenant_id)).all()
+            if allowed is not None and not recipients:
+                continue
             link = f"{settings.public_web_url.rstrip('/')}{row.link or '/'}"
-            for address in owners:
+            for address in recipients:
                 mail.send(address, f"Gluons: {row.title}", f"{row.title}\n\n{row.body}\n\nOpen Gluons: {link}\n")
             row.delivered_at = utcnow()
             sent += 1

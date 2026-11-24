@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     mail_dir: str = ".gluons-data/mail"
     smtp_url: str | None = None
     mail_from: str = "Gluons <no-reply@gluons.example>"
+    mail_allowed_recipients: str = ""
 
     queue_backend: Literal["postgres", "cloud_tasks"] = "postgres"
     worker_lease_seconds: int = 120
