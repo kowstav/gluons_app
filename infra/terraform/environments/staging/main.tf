@@ -103,6 +103,7 @@ module "gluons" {
   database_disk_size_gb      = var.credit_limited_pilot ? 10 : 20
   database_disk_autoresize   = !var.credit_limited_pilot
   backup_retained_count      = var.credit_limited_pilot ? 2 : 14
+  log_retention_days         = var.credit_limited_pilot ? 2 : 7
   deletion_protection        = true
   evidence_retention_days    = 90
   export_retention_days      = 14
