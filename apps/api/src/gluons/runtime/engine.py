@@ -8,6 +8,7 @@ inside an HTTP handler or depends on an open chat.
 """
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -144,7 +145,8 @@ def _apply_outcome(session, run: Run, step: StepRun, node: Node, skill: SkillCon
     if outcome.kind == "complete":
         finish_step("completed")
         run_log.append(session, run.tenant_id, run.id, "step.completed", {"node": node.id, "primitive": node.primitive})
-        return _finish_run(session, run, outcome.output)
+        private_fields = node.params.get("report", []) if node.params.get("record_report") is False else ()
+        return _finish_run(session, run, outcome.output, private_fields=private_fields)
 
     if outcome.kind == "wait_approval":
         step.status = "waiting_approval"
@@ -202,12 +204,13 @@ def _apply_outcome(session, run: Run, step: StepRun, node: Node, skill: SkillCon
     return _fail_run(session, run, outcome.error or "step failed", node, outcome)
 
 
-def _finish_run(session, run: Run, outcome: dict[str, Any]) -> str:
+def _finish_run(session, run: Run, outcome: dict[str, Any], *, private_fields: Collection[str] = ()) -> str:
     transition_run(run, "completed")
     run.outcome = outcome
     run.finished_at = utcnow()
     run.cursor = None
-    run_log.append(session, run.tenant_id, run.id, "run.completed", outcome)
+    history = {key: value for key, value in outcome.items() if key not in private_fields}
+    run_log.append(session, run.tenant_id, run.id, "run.completed", history)
     events.emit(session, run.tenant_id, "run.completed", {"run_id": run.id, "automation_id": run.automation_id})
     return "completed"
 

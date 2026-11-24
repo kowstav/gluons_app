@@ -1,0 +1,61 @@
+id: gluons.inventory_reorder
+slug: inventory_reorder
+version: 1.0.0
+title: Inventory Reorder Review
+domain: inventory
+risk_tier: R0
+activation_modes: [historical_replay, shadow]
+execution_scope: draft_only
+inputs:
+  type: object
+  required: [stock_location, observed_at, basis, counts]
+  additionalProperties: false
+  properties:
+    stock_location: {type: string, minLength: 1, maxLength: 100}
+    observed_at: {type: string, format: date-time}
+    basis: {enum: [synthetic, owner_supplied]}
+    counts: {type: array, minItems: 1, maxItems: 60}
+outputs:
+  type: object
+  required: [reorder_review]
+  properties:
+    reorder_review:
+      type: object
+      required: [rows, drafts, currency, basis, external_actions_performed]
+      properties:
+        rows: {type: array}
+        drafts: {type: array}
+        currency: {type: string}
+        basis: {enum: [synthetic, owner_supplied]}
+        external_actions_performed: {const: 0}
+actions: []
+default_policy: {mode: shadow, allowed_actions: []}
+graph:
+  entry: evaluate_counts
+  nodes:
+    evaluate_counts:
+      primitive: domain
+      params: {fn: reorder.evaluate}
+      blueprint_steps: [1]
+      next: prepare_drafts
+    prepare_drafts:
+      primitive: domain
+      params: {fn: reorder.group_drafts}
+      blueprint_steps: [2]
+      next: report
+    report:
+      primitive: complete
+      params: {outcome: reorder_review_prepared, report: [reorder_review], record_report: false}
+      blueprint_steps: [3]
+failure_handling:
+  Invalid or ambiguous counts: evaluate_counts
+  Missing estimates or quantities above limit: evaluate_counts
+metrics: [items_needing_review]
+declared_status: blocked_by_external_dependency
+blockers:
+  - dependency: inventory_and_purchasing_system
+    needed: Select and verify a pilot stock source and an authorized purchase order system.
+    kind: customer_system
+limitations:
+  - Uses synthetic or owner-supplied counts and estimated unit prices.
+  - Produces grouped supplier drafts for review without contacting suppliers, issuing orders or spending.

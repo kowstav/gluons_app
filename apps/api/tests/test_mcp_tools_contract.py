@@ -9,6 +9,7 @@ import json
 import socket
 import threading
 import time
+from dataclasses import replace
 from decimal import Decimal
 
 import anyio
@@ -19,14 +20,15 @@ from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import select
 
-from gluons import approvals
+from gluons import approvals, data_export, passport
+from gluons.connections import google
 from gluons.core import new_id
-from gluons.db.models import Automation, AutomationPolicy, Notification, Organization, PhoneRoute
+from gluons.db.models import Automation, AutomationPolicy, ConnectionSession, Notification, Organization, PhoneRoute, Run
 from gluons.db.session import tenant_tx
 from gluons.mcp.server import create_mcp_app
 from gluons.mcp.server import create_server as create_mcp_server
 from gluons.runtime import lifecycle
-from helpers import World
+from helpers import World, drain
 from test_assistant_oauth import issue
 
 ALL_SCOPES = "gluons.read gluons.plan gluons.tasks gluons.connections gluons.approvals"
@@ -40,6 +42,9 @@ REQUIRED_TOOLS = {
     "phone_route_status", "policy_preview", "policy_request_activation", "policy_status",
     # product additions
     "list_missing_connections", "set_budget", "deny_action",
+    "start_workflow_setup", "list_workflow_setups", "get_workflow_setup", "answer_workflow_setup",
+    "prepare_workflow_gmail", "link_workflow_draft", "submit_order_trial_case",
+    "configure_inventory_reorder", "submit_inventory_trial_case", "get_task_run",
 }
 
 
@@ -129,6 +134,216 @@ def test_cross_tenant_ids_stay_invisible_to_new_tools(mcp_url, world):
                          ("list_missing_connections", {"automation_id": foreign["id"]}),
                          ("set_budget", {"monthly_budget_usd": 1, "automation_id": foreign["id"], "idempotency_key": "foreign-budget"}))
     assert [error_code(r) for r in results] == ["NOT_FOUND"] * 4
+
+
+def _start_workflow(mcp_url, world, intent):
+    _, [result] = session(mcp_url, world, ("start_workflow_setup", {"intent": intent, "idempotency_key": f"setup-{intent}"}))
+    return payload(result)
+
+
+def _answers(setup, answers):
+    return [("answer_workflow_setup", {"setup_id": setup["id"], "question_id": question, "answer": value,
+                                        "expected_version": setup["version"] + position})
+            for position, (question, value) in enumerate(answers)]
+
+
+def test_launch_intake_reuses_confirmed_passport_and_links_draft_without_authority(mcp_url, world):
+    owner = replace(world.owner, session_id="passport-owner")
+    passport.update(owner, 1, {"selling_regions": ["IN"]})
+    setup = _start_workflow(mcp_url, world, "start_business")
+    assert setup["guidance"]["next_question"]["id"] == "business_idea"
+    assert _start_workflow(mcp_url, world, "start_business")["id"] == setup["id"]
+    answers = _answers(setup, (
+        ("business_idea", "Sell office supplies to small businesses"),
+        ("market", "IN"),
+        ("product_decision", "assistant_recommends"),
+        ("supplier_decision", "already_chosen"),
+        ("supplier_name", "Existing Supply Co"),
+        ("storefront_decision", "assistant_decides_within_rules"),
+    ))
+    _, results = session(mcp_url, world, *answers,
+                         ("create_business_launch_plan", {"goal": "Sell office supplies", "country": "IN",
+                                                           "idempotency_key": "office-launch-draft"}))
+    states = [payload(result) for result in results]
+    assert states[0]["guidance"]["next_question"]["suggested_answer"] == {"value": "IN", "source": "business_passport"}
+    assert "market" not in states[0]["guidance"]["answers"]
+    assert states[-2]["guidance"]["status"] == "ready_to_draft"
+    draft = states[-1]
+    _, [linked, listed] = session(mcp_url, world,
+                                  ("link_workflow_draft", {"setup_id": setup["id"], "draft_id": draft["id"],
+                                                           "expected_version": states[-2]["version"]}),
+                                  ("list_workflow_setups", {}))
+    linked = payload(linked)
+    assert linked["guidance"]["workflow_draft"] == {"kind": "launch_plan", "id": draft["id"]}
+    assert linked["guidance"]["authorization"] == "none"
+    assert payload(listed)["sessions"][0]["workflow_artifact"]["id"] == draft["id"]
+    exported = data_export.export_page(owner, "setup_sessions")
+    assert "assistant_recommends" in str(exported)
+    assert "link_hash" not in str(exported) and "idempotency_hash" not in str(exported)
+
+
+def test_workflow_answers_check_scope_version_tenant_and_relevant_questions(mcp_url, world):
+    setup = _start_workflow(mcp_url, world, "delegate_workflow")
+    _, [foreign] = session(mcp_url, World.create("Different business"),
+                           ("get_workflow_setup", {"setup_id": setup["id"]}))
+    assert error_code(foreign) == "NOT_FOUND"
+    call = _answers(setup, (("process", "other"),))[0]
+    _, [read_only] = session(mcp_url, world, call, scopes="gluons.read")
+    assert error_code(read_only) == "FORBIDDEN"
+    _, [invalid, saved, duplicate, stale, secret] = session(
+        mcp_url, world,
+        _answers(setup, (("intake_channel", "gmail"),))[0], call, call,
+        _answers(setup, (("process", "order_intake"),))[0],
+        ("answer_workflow_setup", {"setup_id": setup["id"], "question_id": "process_example",
+                                   "answer": "password: sample", "expected_version": 2}),
+    )
+    assert payload(saved) == payload(duplicate)
+    assert [error_code(r) for r in (invalid, stale, secret)] == ["VALIDATION_FAILED", "CONFLICT_VERSION", "VALIDATION_FAILED"]
+    _, results = session(mcp_url, world, *_answers(payload(saved), (
+        ("process_example", "Stock falls below ten units"),
+        ("system_of_record", "The warehouse"),
+        ("routine_decision", "assistant_recommends"),
+        ("exceptions", "Ask about price changes. Done when the supplier accepts."),
+    )))
+    assert payload(results[-1])["guidance"]["status"] == "planning_only"
+
+
+def test_chat_gmail_handoff_is_scoped_and_resumable_without_provider_access(mcp_url, world, monkeypatch):
+    monkeypatch.setattr(google, "configured", lambda: True)
+    setup = _start_workflow(mcp_url, world, "delegate_workflow")
+    _, results = session(mcp_url, world, *_answers(setup, (
+        ("process", "order_intake"), ("intake_channel", "gmail"),
+        ("process_example", "A customer sends a purchase order."),
+        ("system_of_record", "ERPNext"),
+        ("routine_decision", "assistant_recommends"),
+        ("exceptions", "Review unknown items. Done after order readback."),
+    )))
+    ready = payload(results[-1])
+    assert ready["guidance"]["status"] == "needs_connection"
+    call = ("prepare_workflow_gmail", {"setup_id": setup["id"], "expected_version": ready["version"],
+                                      "idempotency_key": "request-gmail-intake"})
+    _, [no_scope] = session(mcp_url, world, call, scopes="gluons.read gluons.plan")
+    assert error_code(no_scope) == "FORBIDDEN"
+    _, [handoff, replay] = session(mcp_url, world, call, call)
+    handoff = payload(handoff)
+    assert handoff == payload(replay)
+    assert handoff["next_actions"][0]["owner_url"].startswith("http")
+    assert handoff["next_actions"][0]["owner_url"].endswith(f"/setup/{handoff['connection']['id']}")
+    assert not any(scope.endswith(".send") for scope in handoff["connection"]["requested_scopes"])
+    _, [resumed] = session(mcp_url, world, ("get_workflow_setup", {"setup_id": setup["id"]}))
+    assert payload(resumed) == handoff
+    with tenant_tx(world.tenant_id) as db:
+        saved = db.get(ConnectionSession, handoff["connection"]["id"])
+        assert saved.connection_id is None and saved.state_hash is None
+
+
+def test_chat_order_draft_runs_only_a_shadow_case_and_can_be_monitored_and_paused(mcp_url, world, erp, sandbox_erp):
+    erp_id = world.connect_erp(sandbox_erp)
+    setup = _start_workflow(mcp_url, world, "delegate_workflow")
+    _, results = session(mcp_url, world, *_answers(setup, (
+        ("process", "order_intake"), ("intake_channel", "manual"),
+        ("process_example", "Enter routine synthetic orders."),
+        ("system_of_record", "ERPNext simulator"),
+        ("routine_decision", "assistant_decides_within_rules"),
+        ("exceptions", "Review unknown items and report the simulated outcome."),
+    )), ("create_automation", {"skill_id": "multichannel_order_entry", "idempotency_key": "create-order-draft",
+                               "config": {"connections": {"erp": erp_id}, "currency": "USD"}}))
+    setup, draft = map(payload, results[-2:])
+    sample = ("submit_order_trial_case", {"automation_id": draft["id"], "text": "2 cases FISH-1",
+                                         "sample_sender": "orders@harbor-bistro.com", "idempotency_key": "sample-fish-order"})
+    _, [linked, rejected, trial, run, duplicate, changed] = session(
+        mcp_url, world,
+        ("link_workflow_draft", {"setup_id": setup["id"], "draft_id": draft["id"], "expected_version": setup["version"]}),
+        ("submit_order_trial_case", sample[1] | {"idempotency_key": "before-trial"}),
+        ("start_trial", {"automation_id": draft["id"], "expected_version": draft["version"], "idempotency_key": "start-order-shadow"}),
+        sample, sample, ("submit_order_trial_case", sample[1] | {"text": "3 cases FISH-1"}),
+    )
+    assert payload(linked)["guidance"]["status"] == "workflow_linked"
+    assert error_code(rejected) == "CONFLICT"
+    assert payload(duplicate) == {"run_id": payload(run)["run_id"], "duplicate": True}
+    assert error_code(changed) == "CONFLICT"
+    assert drain() > 0
+    with tenant_tx(world.tenant_id) as db:
+        completed = db.get(Run, payload(run)["run_id"])
+        assert completed.outcome["simulated"] and completed.outcome["outcome"] == "shadow_would_create_order"
+    _, [status, evidence, paused] = session(
+        mcp_url, world,
+        ("get_task_status", {"task_id": draft["id"]}),
+        ("get_task_evidence", {"task_id": draft["id"]}),
+        ("pause_task", {"task_id": draft["id"], "expected_version": payload(trial)["version"], "idempotency_key": "pause-order-shadow"}),
+    )
+    assert payload(status)["mode"] == "shadow"
+    assert all(not receipt["verified"] for receipt in payload(evidence)["receipts"])
+    assert payload(paused)["status"] == "paused" and erp.orders() == []
+
+
+def test_chat_reorder_uses_saved_rules_and_groups_only_reviewable_lines(mcp_url):
+    world = World.create("Demo Workshop Supply")
+    setup = _start_workflow(mcp_url, world, "delegate_workflow")
+    _, results = session(mcp_url, world, *_answers(setup, (
+        ("process", "inventory_reorder"),
+        ("process_example", "Review low stock each morning."),
+        ("system_of_record", "Warehouse counts"),
+        ("routine_decision", "assistant_recommends"),
+        ("exceptions", "Ask about missing costs and excessive quantities."),
+    )), ("create_automation", {"skill_id": "inventory_reorder", "idempotency_key": "reorder-automation"}))
+    setup, draft = map(payload, results[-2:])
+    assert setup["guidance"]["automation_skill_id"] == "inventory_reorder"
+    _, [linked, configured] = session(
+        mcp_url, world,
+        ("link_workflow_draft", {"setup_id": setup["id"], "draft_id": draft["id"], "expected_version": setup["version"]}),
+        ("configure_inventory_reorder", {"automation_id": draft["id"], "expected_version": draft["version"],
+                                         "idempotency_key": "reorder-rules",
+                                         "rules": {"stock_location": "Main warehouse", "currency": "INR", "items": [
+                                             {"sku": "BEANS", "supplier": "Supply Co", "reorder_below": 10, "target": 22,
+                                              "max_order": 25, "pack_size": 6, "unit_cost_minor": 450},
+                                             {"sku": "CUPS", "supplier": "Supply Co", "reorder_below": 5, "target": 10,
+                                              "max_order": 10, "unit_cost_minor": 5},
+                                             {"sku": "LIDS", "supplier": "Supply Co", "reorder_below": 5, "target": 10,
+                                              "max_order": 5, "unit_cost_minor": 10},
+                                             {"sku": "BAGS", "supplier": "Other Co", "reorder_below": 5, "target": 8,
+                                              "max_order": 8},
+                                         ]}}),
+    )
+    assert payload(linked)["guidance"]["status"] == "workflow_linked"
+    assert "configure_inventory_reorder" in payload(linked)["guidance"]["next_tools"]
+    case = ("submit_inventory_trial_case", {"automation_id": draft["id"], "idempotency_key": "warehouse-count",
+                                            "snapshot": {"stock_location": "Main warehouse",
+                                                         "observed_at": "2026-11-10T08:00:00Z", "basis": "owner_supplied",
+                                                         "counts": [{"sku": "BEANS", "available": 3, "on_order": 2},
+                                                                    {"sku": "CUPS", "available": 4, "on_order": 0},
+                                                                    {"sku": "LIDS", "available": 0, "on_order": 0},
+                                                                    {"sku": "BAGS", "available": 0, "on_order": 0}]}})
+    _, [before_trial, trial, started, retry] = session(
+        mcp_url, world, case,
+        ("start_trial", {"automation_id": draft["id"], "expected_version": payload(configured)["version"],
+                         "idempotency_key": "reorder-shadow"}), case, case,
+    )
+    assert error_code(before_trial) == "CONFLICT"
+    run_id = payload(started)["run_id"]
+    assert payload(retry) == {"run_id": run_id, "duplicate": True}
+    assert drain() > 0
+    _, [report, evidence, paused] = session(
+        mcp_url, world,
+        ("get_task_run", {"run_id": run_id}),
+        ("get_task_evidence", {"task_id": draft["id"]}),
+        ("pause_task", {"task_id": draft["id"], "expected_version": payload(trial)["version"],
+                        "idempotency_key": "pause-inventory-trial"}),
+    )
+    outcome = payload(report)["outcome"]
+    assert outcome["simulated"] and outcome["outcome"] == "reorder_review_prepared"
+    review = outcome["reorder_review"]
+    assert review["external_actions_performed"] == 0 and review["basis"] == "owner_supplied" and review["currency"] == "INR"
+    assert len(review["drafts"]) == 1
+    grouped = review["drafts"][0]
+    assert grouped["supplier"] == "Supply Co" and grouped["estimated_total_minor"] == 8130
+    assert [(row["sku"], row["quantity"]) for row in grouped["lines"]] == [("BEANS", 18), ("CUPS", 6)]
+    assert [(row["sku"], row["reason"]) for row in review["rows"] if row["status"] == "needs_review"] == [
+        ("LIDS", "quantity_limit_exceeded"), ("BAGS", "missing_price"),
+    ]
+    assert payload(evidence)["receipts"] == [] and payload(paused)["status"] == "paused"
+    _, [foreign] = session(mcp_url, World.create("Another warehouse"), ("get_task_run", {"run_id": run_id}))
+    assert error_code(foreign) == "NOT_FOUND"
 
 
 def test_estimate_cost_never_invents_a_model_price(mcp_url, world):

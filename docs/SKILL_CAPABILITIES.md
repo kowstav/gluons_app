@@ -4,6 +4,7 @@ All 31 blueprint skills are registered. Registration is not proof that a busines
 
 ## What executes locally
 
+- The inventory reorder playbook supplements the historical catalog. From supplied stock counts and saved item rules, it calculates pack quantities and prepares supplier-grouped drafts. Threshold, quantity, and price exceptions stay visible for review. The playbook runs in replay or shadow.
 - All 30 preparation contracts produce schema-checked review packets, hashes of supplied sources, missing-data questions, safety flags and an explicit `not_executed` checklist for every pending blueprint step. They have no provider-action allowlist and advertise replay/shadow only. Runtime activation also rejects draft-only contracts.
 - Inventory planning computes ingredient shortfalls and estimated purchasing costs from supplied demand, stock and on-order quantities. It does not forecast demand or place purchases.
 - Bookkeeping and accounting preparation match exact invoice reference, legal entity, currency and amount, flag duplicate/ambiguous matches and never post entries.

@@ -296,11 +296,13 @@ def test_gmail_health_detects_a_revoked_grant(world, monkeypatch):
 def test_public_endpoints_are_rate_limited_per_address(monkeypatch):
     from gluons import ratelimit
 
+    within_window = utcnow().replace(second=30, microsecond=0)
+    monkeypatch.setattr(ratelimit, "utcnow", lambda: within_window)
     monkeypatch.setattr(get_settings(), "rate_limits_enabled", True)
     monkeypatch.setitem(ratelimit.LIMITS, "login", (3, 60))
     monkeypatch.setattr(get_settings(), "trusted_proxy_hops", 2)
     client = TestClient(create_app())
-    address = f"203.0.113.{int(new_id('x').split('_')[1][:2], 16)}"
+    address = "192.0.2.42"
     body = {"email": "nobody@example.com", "password": "not the password at all"}
     codes = [client.post("/v1/auth/login", json=body, headers={"X-Forwarded-For": f"10.0.0.1, {address}, 198.51.100.7"}).status_code for _ in range(4)]
     assert codes[:3] == [401, 401, 401] and codes[3] == 429

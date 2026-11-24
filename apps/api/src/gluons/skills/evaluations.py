@@ -14,8 +14,9 @@ from gluons.skills.registry import get_registry
 
 def preparation_suite(skill_id: str) -> dict[str, Any]:
     skill = get_registry().loaded(skill_id)
-    if skill.contract.execution_scope != "draft_only":
-        raise validation_failed("Use provider-specific runtime evaluations for this skill.")
+    entry = skill.contract.graph.nodes[skill.contract.graph.entry]
+    if entry.primitive != "domain" or entry.params.get("fn") != "drafts.prepare":
+        raise validation_failed("Use the runtime evaluation for this skill.")
     fixtures = json.loads((Path(get_settings().skills_dir) / skill.contract.slug / "evals.json").read_text(encoding="utf-8"))
     started = perf_counter()
     cases = []

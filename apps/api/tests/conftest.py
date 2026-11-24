@@ -83,7 +83,7 @@ class Erp:
         return httpx.get(f"{self.base}/__sim/orders", timeout=5).json()["orders"]
 
     def reset(self) -> None:
-        httpx.post(f"{self.base}/__sim/reset", timeout=5).raise_for_status()
+        httpx.post(f"{self.base}/__sim/reset", timeout=15).raise_for_status()
 
 
 @pytest.fixture

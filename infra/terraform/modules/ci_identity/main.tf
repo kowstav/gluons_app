@@ -9,7 +9,7 @@ terraform {
 
 variable "github_repository" {
   type        = string
-  description = "OWNER/REPO. The repository has no GitHub remote yet."
+  description = "OWNER/REPO that owns the release workflow."
 }
 variable "github_environment" {
   type        = string
@@ -33,9 +33,14 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.environment" = "assertion.environment"
   }
 
-  # Checked on Google's side, so a pull request from a fork or a job outside the protected
-  # GitHub environment cannot obtain a token at all.
-  attribute_condition = "assertion.repository == \"${var.github_repository}\" && assertion.environment == \"${var.github_environment}\""
+  # Bind access to the manual release workflow on the default release branch.
+  attribute_condition = join(" && ", [
+    "assertion.repository == \"${var.github_repository}\"",
+    "assertion.environment == \"${var.github_environment}\"",
+    "assertion.ref == \"refs/heads/main\"",
+    "assertion.event_name == \"workflow_dispatch\"",
+    "assertion.job_workflow_ref == \"${var.github_repository}/.github/workflows/deploy-environment.yml@refs/heads/main\"",
+  ])
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"

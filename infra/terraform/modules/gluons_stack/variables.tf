@@ -41,6 +41,12 @@ variable "web_url" {
   description = "Public web origin when there is no web_host. Must be https."
 }
 
+variable "use_run_app_origins" {
+  type        = bool
+  default     = false
+  description = "Use the deterministic Cloud Run HTTPS origins for the API and web."
+}
+
 variable "api_host" {
   type        = string
   default     = ""
@@ -89,6 +95,11 @@ variable "database_high_availability" {
 variable "database_disk_size_gb" {
   type    = number
   default = 20
+}
+
+variable "database_disk_autoresize" {
+  type    = bool
+  default = true
 }
 
 variable "backup_retained_count" {

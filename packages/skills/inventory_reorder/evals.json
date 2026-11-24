@@ -1,0 +1,42 @@
+{
+  "rules": {
+    "stock_location": "Warehouse",
+    "currency": "INR",
+    "items": [
+      {"sku": "BEANS", "supplier": "Supply Co", "reorder_below": 10, "target": 22, "max_order": 20, "pack_size": 6, "unit_cost_minor": 450}
+    ]
+  },
+  "cases": [
+    {
+      "id": "incoming-stock-and-packs",
+      "counts": [{"sku": "BEANS", "available": 3, "on_order": 2}],
+      "expected": {"status": "draft", "stock_position": 5, "quantity": 18, "estimated_cost_minor": 8100}
+    },
+    {
+      "id": "stock-exactly-at-threshold",
+      "counts": [{"sku": "BEANS", "available": 8, "on_order": 2}],
+      "expected": {"status": "stock_sufficient", "stock_position": 10}
+    },
+    {
+      "id": "duplicate-count",
+      "counts": [{"sku": "BEANS", "available": 3, "on_order": 2}, {"sku": "BEANS", "available": 7, "on_order": 0}],
+      "expected": {"status": "needs_review", "reason": "duplicate_stock_count"}
+    },
+    {
+      "id": "missing-count",
+      "counts": [{"sku": "CUPS", "available": 1, "on_order": 0}],
+      "expected": {"status": "needs_review", "reason": "missing_stock_count"}
+    },
+    {
+      "id": "rounding-exceeds-limit",
+      "counts": [{"sku": "BEANS", "available": 2, "on_order": 1}],
+      "expected": {"status": "needs_review", "reason": "quantity_limit_exceeded", "suggested_quantity": 24, "stock_position": 3}
+    },
+    {
+      "id": "wrong-warehouse",
+      "stock_location": "Outlet",
+      "counts": [{"sku": "BEANS", "available": 3, "on_order": 2}],
+      "expected": {"status": "needs_review", "reason": "stock_location_mismatch"}
+    }
+  ]
+}

@@ -73,12 +73,14 @@ def list_runs(principal: Principal, automation_id: str | None = None, *, limit: 
         return [serialize_run(r) for r in session.execute(query).scalars()]
 
 
-def get_run(principal: Principal, run_id: str) -> dict[str, Any]:
+def get_run(principal: Principal, run_id: str, *, details: bool = True) -> dict[str, Any]:
     principal.require("tasks:read")
     with tenant_tx(principal.tenant_id, principal.user_id) as session:
         run = session.get(Run, run_id)
         if run is None:
             raise not_found("Run")
+        if not details:
+            return serialize_run(run)
         steps = session.execute(select(StepRun).where(StepRun.run_id == run_id).order_by(StepRun.started_at)).scalars()
         events = session.execute(select(RunEvent).where(RunEvent.run_id == run_id).order_by(RunEvent.seq)).scalars()
         receipts = session.execute(select(ActionReceipt).where(ActionReceipt.run_id == run_id)).scalars()

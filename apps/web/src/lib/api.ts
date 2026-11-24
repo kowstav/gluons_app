@@ -1,4 +1,6 @@
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+export const API_URL = process.env.NEXT_PUBLIC_SAME_ORIGIN_API === "true"
+  ? "/api"
+  : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
 export class ApiError extends Error {
   constructor(public code: string, message: string, public status: number) { super(message); }

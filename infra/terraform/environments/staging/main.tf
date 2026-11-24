@@ -1,16 +1,4 @@
-# Gluons staging environment. NOTHING HERE HAS BEEN APPLIED OR PLANNED AGAINST A REAL PROJECT.
-# `terraform apply` creates chargeable resources and needs the owner's explicit approval.
-#
-# ESTIMATED COST, UNVERIFIED. Written from memory of list prices, not checked against the
-# Google Cloud pricing pages or a billing export, and excludes egress and provider usage.
-# Use the Pricing Calculator before approving. Rough USD per month, us-central1:
-#   Cloud SQL db-custom-2-7680, zonal, 20 GB, backups   110 to 140
-#   Cloud Run, scale to zero, light use                   5 to 25
-#   Load balancer forwarding rules                       18 to 25
-#   Cloud Armor policy and rules                          8 to 12
-#   KMS, Secret Manager, Artifact Registry, Pub/Sub       3 to 10
-#   Cloud Scheduler, Cloud Tasks, Logging, Monitoring     1 to 10
-#   Total                                                 about 145 to 220
+# Applying staging creates billable resources and requires explicit owner approval.
 terraform {
   required_version = ">= 1.9, < 2.0"
   required_providers {
@@ -50,6 +38,20 @@ variable "web_host" {
 variable "enable_load_balancer" {
   type    = bool
   default = false
+}
+variable "credit_limited_pilot" {
+  type        = bool
+  default     = false
+  description = "Use a small database and Cloud Run HTTPS origins for a short staging pilot."
+
+  validation {
+    condition = !var.credit_limited_pilot || (
+      var.region == "us-central1" && !var.enable_load_balancer &&
+      var.api_host == "" && var.web_host == "" && var.billing_account == "" &&
+      var.worker_invoker_iam_check
+    )
+    error_message = "The credit-limited pilot requires us-central1, Cloud Run origins, owner-managed budgets, and IAM on the private worker."
+  }
 }
 variable "plain_env" {
   type    = map(string)
@@ -96,14 +98,16 @@ module "gluons" {
   plain_env         = var.plain_env
   populated_secrets = var.populated_secrets
 
-  database_tier              = "db-custom-2-7680"
+  database_tier              = var.credit_limited_pilot ? "db-g1-small" : "db-custom-2-7680"
   database_high_availability = false
-  database_disk_size_gb      = 20
-  backup_retained_count      = 14
+  database_disk_size_gb      = var.credit_limited_pilot ? 10 : 20
+  database_disk_autoresize   = !var.credit_limited_pilot
+  backup_retained_count      = var.credit_limited_pilot ? 2 : 14
   deletion_protection        = true
   evidence_retention_days    = 90
   export_retention_days      = 14
-  max_instances              = 3
+  max_instances              = var.credit_limited_pilot ? 1 : 3
+  use_run_app_origins        = var.credit_limited_pilot
   enable_load_balancer       = var.enable_load_balancer
   worker_invoker_iam_check   = var.worker_invoker_iam_check
 

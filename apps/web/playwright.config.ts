@@ -17,6 +17,6 @@ export default defineConfig({
   ],
   webServer: [
     { command: `"${python}" tests/start_api.py`, url: "http://localhost:8001/ready", timeout: 120_000, reuseExistingServer: false },
-    { command: "npm run dev -- --port 3001", url: "http://localhost:3001", timeout: 120_000, reuseExistingServer: false, env: { NEXT_PUBLIC_API_URL: "http://localhost:8001", NEXT_TELEMETRY_DISABLED: "1" } },
+    { command: "npm run dev -- --port 3001", url: "http://localhost:3001", timeout: 120_000, reuseExistingServer: false, env: { NEXT_PUBLIC_API_URL: "http://localhost:8001", NEXT_PUBLIC_SAME_ORIGIN_API: "true", NEXT_TELEMETRY_DISABLED: "1" } },
   ],
 });
