@@ -254,14 +254,14 @@ test("owner can verify, create a business, trial, pause, cancel and manage its r
   await expect(page.getByText(/"allowed_recipients"/)).toContainText("proof@example.com");
   await expect(page.getByText(/"allowed_recipients"/)).toContainText('"expires_at"');
   await page.getByRole("button", { name: "Start shadow trial", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("start-trial recorded");
+  await expect(page.getByRole("status").filter({ hasText: "start-trial recorded." })).toBeVisible();
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByText("paused", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByText("trial shadow", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cancel automation", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Cancellation recorded");
+  await expect(page.getByRole("status").filter({ hasText: "Cancellation recorded." })).toBeVisible();
   await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
 
   await navigate(page, "Business knowledge");

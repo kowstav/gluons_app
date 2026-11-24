@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import smtplib
+import ssl
 from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from gluons.config import get_settings
 from gluons.core import new_id, utcnow
@@ -34,7 +35,7 @@ def send(to: str, subject: str, body: str) -> None:
     message["Subject"] = subject
     message.set_content(body)
     with smtplib.SMTP(url.hostname or "localhost", url.port or 587, timeout=20) as smtp:
-        smtp.starttls()
+        smtp.starttls(context=ssl.create_default_context())
         if url.username:
-            smtp.login(url.username, url.password or "")
+            smtp.login(unquote(url.username), unquote(url.password or ""))
         smtp.send_message(message)

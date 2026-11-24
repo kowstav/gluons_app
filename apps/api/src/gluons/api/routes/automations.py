@@ -277,7 +277,8 @@ def sign_policy_options(policy_id: str, principal: PrincipalDep) -> dict[str, An
             raise conflict("This policy does not require a spending passkey.")
         if not principal.user_id or not principal.session_id:
             raise auth_required()
-        return passkeys.begin_policy(session, principal.user_id, principal.session_id, policy.policy_challenge_hash(draft))
+        return passkeys.begin_policy(session, principal.user_id, principal.session_id, principal.tenant_id,
+                                     policy.policy_challenge_hash(draft))
 
 
 @router.post("/automation-policies/{policy_id}/sign")
@@ -287,7 +288,8 @@ def sign_policy(policy_id: str, principal: PrincipalDep, body: passkeys.Proof | 
         if policy.requires_spending_passkey(draft):
             if body is None or not principal.user_id or not principal.session_id:
                 raise GluonsError("PASSKEY_REQUIRED", "Verify this spending allowance with your passkey.", status=403)
-            passkeys.verify_policy(session, principal.user_id, principal.session_id, policy.policy_challenge_hash(draft), body)
+            passkeys.verify_policy(session, principal.user_id, principal.session_id, principal.tenant_id,
+                                   policy.policy_challenge_hash(draft), body)
             audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="policy.passkey_verified",
                          actor=principal, resource_type="automation_policy", resource_id=draft.id,
                          data={"policy_version": draft.policy_version})

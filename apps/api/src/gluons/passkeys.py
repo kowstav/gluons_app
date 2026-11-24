@@ -67,11 +67,13 @@ def _invalid() -> GluonsError:
     return GluonsError("PASSKEY_INVALID", "The passkey could not verify this request. Try again.", status=403)
 
 
-def _session(session: Session, user_id: str, session_id: str, *, recent: bool = False) -> None:
+def _session(session: Session, user_id: str, session_id: str, *, recent: bool = False, tenant_id: str | None = None) -> None:
     row = session.get(IdentitySession, session_id, with_for_update=True)
     now = utcnow()
     if row is None or row.user_id != user_id or row.revoked_at is not None or row.expires_at <= now:
         raise auth_required()
+    if tenant_id is not None and row.active_tenant_id != tenant_id:
+        raise GluonsError("ORG_CHANGED", "Your active business changed. Return to the policy and try again.", status=409)
     if recent and now - (row.mfa_verified_at or row.created_at) > ENROLLMENT_WINDOW:
         raise GluonsError("SIGN_IN_AGAIN", "Sign in again before adding a passkey.", status=403)
 
@@ -145,9 +147,9 @@ def finish_enrollment(view: SessionView, proof: Proof) -> None:
         row.used_at = utcnow()
 
 
-def begin_policy(session: Session, user_id: str, session_id: str, decision_hash: str) -> dict[str, Any]:
+def begin_policy(session: Session, user_id: str, session_id: str, tenant_id: str, decision_hash: str) -> dict[str, Any]:
     _, rp_id = _relying_party()
-    _session(session, user_id, session_id)
+    _session(session, user_id, session_id, tenant_id=tenant_id)
     passkey = session.get(OwnerPasskey, user_id)
     if passkey is None:
         raise GluonsError("PASSKEY_REQUIRED", "Add a passkey in Account security before granting an unattended spending allowance.", status=403)
@@ -158,9 +160,9 @@ def begin_policy(session: Session, user_id: str, session_id: str, decision_hash:
     return {"challenge_id": row.id, "options": json.loads(options_to_json(options))}
 
 
-def verify_policy(session: Session, user_id: str, session_id: str, decision_hash: str, proof: Proof) -> None:
+def verify_policy(session: Session, user_id: str, session_id: str, tenant_id: str, decision_hash: str, proof: Proof) -> None:
     origin, rp_id = _relying_party()
-    _session(session, user_id, session_id)
+    _session(session, user_id, session_id, tenant_id=tenant_id)
     row = _load(session, proof, user_id, session_id, "policy", decision_hash)
     passkey = session.get(OwnerPasskey, user_id, with_for_update=True)
     if passkey is None:
