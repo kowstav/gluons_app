@@ -809,34 +809,34 @@
   source: doc07
   requirement: Terraform for all services with dev staging prod
   owner: infra
-  status: blocked
+  status: partial
   code:
   - infra/terraform/environments/staging/main.tf
   - infra/terraform/modules/gluons_stack/main.tf
   tests: []
-  blocker: Credit-limited staging validated and planned against the live state backend on November 24, 2026. Owner approval of the exact plan and hosted apply evidence are pending.
+  blocker: Credit-limited Cloud Run and Cloud SQL staging were applied and smoke tested on November 24, 2026. Production provisioning and production deployment evidence are pending.
 - id: IN-02
   source: doc07
   requirement: Docker images and Compose
   owner: infra
-  status: blocked
+  status: partial
   code:
   - docker-compose.yml
   - apps/api/Dockerfile
   - apps/web/Dockerfile
   - apps/sandbox_erp/Dockerfile
   tests: []
-  blocker: Docker daemon was unavailable, so images have never been built.
+  blocker: GitHub built and scanned all three images. The scanned API and web images ran in hosted staging. End-to-end Compose acceptance remains pending.
 - id: IN-03
   source: doc03
   requirement: CI with scans and tests
   owner: infra
-  status: blocked
+  status: done
   code:
   - .github/workflows/ci.yml
   - .github/workflows/deploy.yml
-  tests: []
-  blocker: No GitHub remote exists yet, so the workflows have never run.
+  tests:
+  - scripts/test_cloud_run_rollout.py
 - id: IN-04
   source: doc07
   requirement: Runbooks backups observability alerts
