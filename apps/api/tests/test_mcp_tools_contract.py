@@ -22,12 +22,12 @@ from sqlalchemy import select
 
 from gluons import approvals, data_export, passport
 from gluons.connections import google
-from gluons.core import new_id
+from gluons.core import GluonsError, new_id
 from gluons.db.models import Automation, AutomationPolicy, ConnectionSession, Notification, Organization, PhoneRoute, Run
 from gluons.db.session import tenant_tx
 from gluons.mcp.server import create_mcp_app
 from gluons.mcp.server import create_server as create_mcp_server
-from gluons.runtime import lifecycle
+from gluons.runtime import engine, lifecycle
 from helpers import World, drain
 from test_assistant_oauth import issue
 
@@ -44,7 +44,7 @@ REQUIRED_TOOLS = {
     "list_missing_connections", "set_budget", "deny_action",
     "start_workflow_setup", "list_workflow_setups", "get_workflow_setup", "answer_workflow_setup",
     "prepare_workflow_gmail", "link_workflow_draft", "submit_order_trial_case",
-    "configure_inventory_reorder", "submit_inventory_trial_case", "get_task_run",
+    "configure_inventory_reorder", "submit_inventory_trial_case", "get_task_run", "configure_trial_handoff",
 }
 
 
@@ -344,6 +344,92 @@ def test_chat_reorder_uses_saved_rules_and_groups_only_reviewable_lines(mcp_url)
     assert payload(evidence)["receipts"] == [] and payload(paused)["status"] == "paused"
     _, [foreign] = session(mcp_url, World.create("Another warehouse"), ("get_task_run", {"run_id": run_id}))
     assert error_code(foreign) == "NOT_FOUND"
+
+
+def _make_handoff_trials(world):
+    source = lifecycle.create(world.owner, skill_id="inventory_reorder", config={"inventory_rules": {
+        "stock_location": "Parts Room", "currency": "INR", "items": [{
+            "sku": "RELAY-12V", "supplier": "Parts Co", "reorder_below": 5, "target": 10,
+            "max_order": 10, "unit_cost_minor": 2500,
+        }],
+    }})
+    target = lifecycle.create(world.owner, skill_id="hardware_procurement")
+    return (lifecycle.start_trial(world.owner, draft["id"], "shadow", draft["version"])
+            for draft in (source, target))
+
+
+def _handoff_link(source, target_id):
+    return ("configure_trial_handoff", {"automation_id": source["id"], "target_automation_id": target_id,
+                                        "expected_version": source["version"]})
+
+
+def _handoff_case(source, key, *, count=2):
+    return ("submit_inventory_trial_case", {"automation_id": source["id"], "idempotency_key": key, "snapshot": {
+        "stock_location": "Parts Room", "observed_at": "2026-11-25T08:00:00Z", "basis": "synthetic",
+        "counts": [{"sku": "RELAY-12V", "available": count, "on_order": 0}],
+    }})
+
+
+def test_inventory_handoff_queues_one_linked_procurement_draft_and_exports_provenance(mcp_url, world):
+    source, target = _make_handoff_trials(world)
+    case = _handoff_case(source, "relay-sample")
+    _, [link, submitted, repeated] = session(mcp_url, world, _handoff_link(source, target["id"]), case, case)
+    assert payload(link)["trial_handoff_target_id"] == target["id"]
+    source_run_id = payload(submitted)["run_id"]
+    assert payload(repeated) == {"run_id": source_run_id, "duplicate": True}
+    assert drain() > 0
+    assert engine.advance(world.tenant_id, source_run_id, "retry").status == "busy_or_finished"
+    _, [source_run] = session(mcp_url, world, ("get_task_run", {"run_id": source_run_id}))
+    link_result = payload(source_run)["outcome"]["trial_handoff"]
+    assert link_result["status"] == "queued" and link_result["target_automation_id"] == target["id"]
+    target_run_id = link_result["run_id"]
+    _, [target_run, evidence] = session(mcp_url, world, ("get_task_run", {"run_id": target_run_id}),
+                                        ("get_task_evidence", {"task_id": target["id"]}))
+    report = payload(target_run)
+    assert report["status"] == "completed" and report["source_trial_run_id"] == source_run_id
+    assert report["outcome"]["simulated"] and report["outcome"]["would_escalate"]
+    assert report["outcome"]["draft"]["source_evidence"] == [source_run_id]
+    assert report["outcome"]["draft"]["external_actions_performed"] == 0
+    assert payload(evidence)["receipts"] == []
+    with tenant_tx(world.tenant_id) as db:
+        runs = db.scalars(select(Run).where(Run.automation_id == target["id"])).all()
+        assert len(runs) == 1 and runs[0].policy_id is None
+        assert runs[0].input["facts"] == {"bom": [{"part_number": "RELAY-12V", "quantity": 8, "supplier": "Parts Co",
+                                                    "estimated_total_minor": 20000}], "currency": "INR",
+                                         "inventory_basis": "synthetic", "cost_basis": "configured_unit_estimates"}
+    runs = {row["id"]: row for row in data_export.export_page(world.owner, "runs")["records"]}
+    assert runs[source_run_id]["trial_handoff"] == link_result
+    assert runs[target_run_id]["source_trial_run_id"] == source_run_id
+
+
+def test_inventory_handoff_rejects_invalid_links_and_skips_inactive_or_empty_trials(mcp_url, world):
+    source, target = _make_handoff_trials(world)
+    foreign = World.create("Another Company")
+    foreign_target = lifecycle.create(foreign.owner, skill_id="hardware_procurement")
+    _, [denied] = session(mcp_url, world, _handoff_link(source, target["id"]), scopes="gluons.read")
+    assert error_code(denied) == "FORBIDDEN"
+    _, [cross_tenant, wrong_skill, link, stale] = session(
+        mcp_url, world, _handoff_link(source, foreign_target["id"]), _handoff_link(source, source["id"]),
+        _handoff_link(source, target["id"]), _handoff_link(source, None),
+    )
+    assert error_code(cross_tenant) == "NOT_FOUND"
+    assert error_code(wrong_skill) == "VALIDATION_FAILED"
+    assert error_code(stale) == "CONFLICT_VERSION"
+    source = payload(link)
+    _, [no_reorder] = session(mcp_url, world, _handoff_case(source, "stock-sufficient", count=10))
+    lifecycle.pause(world.owner, target["id"], target["version"])
+    _, [paused] = session(mcp_url, world, _handoff_case(source, "target-paused"))
+    assert drain() > 0
+    with tenant_tx(world.tenant_id) as db:
+        for response, expected in [(no_reorder, "no_reorder_drafts"), (paused, "target_trial_inactive_or_mode_mismatch")]:
+            run = db.get(Run, payload(response)["run_id"])
+            assert run.status == "completed" and run.outcome["trial_handoff"]["reason"] == expected
+        assert db.scalar(select(Run.id).where(Run.automation_id == target["id"])) is None
+    with pytest.raises(GluonsError, match="generated by Gluons"):
+        lifecycle.submit_event(world.tenant_id, target["id"], source="manual", source_event_id="trial-handoff:forged",
+                               payload={}, actor=world.owner)
+    _, [unlinked] = session(mcp_url, world, _handoff_link(source, None))
+    assert payload(unlinked)["trial_handoff_target_id"] is None
 
 
 def test_estimate_cost_never_invents_a_model_price(mcp_url, world):

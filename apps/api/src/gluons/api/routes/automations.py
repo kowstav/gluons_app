@@ -12,7 +12,7 @@ from gluons.api.deps import IdempotencyKey, PrincipalDep, SessionDep, idempotent
 from gluons.core import GluonsError, auth_required, conflict, not_found, validation_failed
 from gluons.db.models import AutomationPolicy, Plan
 from gluons.db.session import tenant_tx
-from gluons.runtime import engine, lifecycle
+from gluons.runtime import engine, handoffs, lifecycle
 from gluons.skills import catalog, registry
 
 router = APIRouter(prefix="/v1", tags=["automations"])
@@ -45,6 +45,11 @@ class Configure(BaseModel):
 
 class Versioned(BaseModel):
     expected_version: int
+
+
+class TrialHandoff(BaseModel):
+    target_automation_id: str | None = Field(min_length=1, max_length=40)
+    expected_version: int = Field(ge=1)
 
 
 class StartTrial(BaseModel):
@@ -148,6 +153,11 @@ def get_automation(automation_id: str, principal: PrincipalDep) -> dict[str, Any
 @router.patch("/automations/{automation_id}")
 def configure(automation_id: str, body: Configure, principal: PrincipalDep) -> dict[str, Any]:
     return lifecycle.configure(principal, automation_id, body.config, body.expected_version)
+
+
+@router.put("/automations/{automation_id}/trial-handoff")
+def configure_trial_handoff(automation_id: str, body: TrialHandoff, principal: PrincipalDep) -> dict[str, Any]:
+    return handoffs.configure(principal, automation_id, body.target_automation_id, body.expected_version)
 
 
 @router.post("/automations/{automation_id}/start-trial")

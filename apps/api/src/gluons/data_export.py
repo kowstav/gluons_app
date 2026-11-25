@@ -22,6 +22,7 @@ from gluons.config import get_settings
 from gluons.core import GluonsError, canonical_json, constant_time_equals, forbidden, hmac_sha256_hex, utcnow, validation_failed
 from gluons.db import models as m
 from gluons.db.session import tenant_tx
+from gluons.runtime.lifecycle import TRIAL_HANDOFF_SOURCE
 from gluons.skills.domain.reorder import SKILL_ID as REORDER_SKILL
 from gluons.skills.domain.reorder import ReorderRules, StockSnapshot
 
@@ -33,7 +34,7 @@ DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
     "memberships": (m.Membership, "created_at", ("id", "user_id", "role", "approval_tier_limit", "created_at", "removed_at")),
     "connections": (m.Connection, "created_at", ("id", "provider", "environment", "account_display", "status", "account_confirmed_at", "last_checked_at", "created_at", "disconnected_at", "version")),
     "assistants": (m.AgentBinding, "created_at", ("id", "user_id", "display_name", "host_kind", "status", "created_at", "last_used_at", "revoked_at")),
-    "automations": (m.Automation, "created_at", ("id", "plan_id", "skill_id", "skill_version", "name", "mode", "status", "risk_tier", "monthly_budget_usd", "per_action_limit_usd", "current_policy_id", "created_by", "created_via", "created_at", "updated_at", "version")),
+    "automations": (m.Automation, "created_at", ("id", "plan_id", "skill_id", "skill_version", "name", "mode", "status", "risk_tier", "monthly_budget_usd", "per_action_limit_usd", "current_policy_id", "created_by", "created_via", "created_at", "updated_at", "version", "trial_handoff_target_id")),
     "runs": (m.Run, "created_at", ("id", "automation_id", "skill_id", "skill_version", "policy_id", "mode", "status", "source", "cost_usd", "created_at", "started_at", "finished_at", "version")),
     "steps": (m.StepRun, "started_at", ("id", "run_id", "node_id", "primitive", "status", "attempts", "model_identifier", "started_at", "finished_at")),
     "approvals": (m.Approval, "created_at", ("id", "kind", "run_id", "automation_id", "action", "risk_tier", "payload_hash", "estimated_cost_usd", "amount_minor", "required_role", "required_approvals", "status", "expires_at", "decided_at", "consumed_at", "created_at", "version")),
@@ -55,7 +56,8 @@ DATASETS: dict[str, tuple[type, str | None, tuple[str, ...]]] = {
     "supplier_quotes": (m.SupplierQuote, "created_at", ("id", "supplier_id", "product", "unit_cost_minor", "currency", "moq", "lead_time_days", "shipping_minor", "duties_minor", "status", "created_at")),
     "audit": (m.AuditEvent, "created_at", ("id", "seq", "category", "event_type", "actor_kind", "actor_id", "resource_type", "resource_id", "decision", "prev_hash", "hash", "created_at")),
 }
-OPTIONAL_COLUMNS = {"automations": ("inventory_rules",), "runs": ("inventory_rules", "inventory_snapshot", "reorder_review")}
+OPTIONAL_COLUMNS = {"automations": ("inventory_rules",),
+                    "runs": ("inventory_rules", "inventory_snapshot", "reorder_review", "trial_handoff", "source_trial_run_id")}
 MAX_PAGE_BYTES = 4 * 1024 * 1024
 MAX_RECORD_BYTES = 512 * 1024
 LIMITATIONS = [
@@ -168,6 +170,8 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
             m.Run.state["inventory_rules"].label("_inventory_rules"),
             case((m.Run.skill_id == REORDER_SKILL, m.Run.input)).label("_inventory_snapshot"),
             m.Run.outcome["reorder_review"].label("_reorder_review"),
+            case((m.Run.skill_id == REORDER_SKILL, m.Run.outcome["trial_handoff"])).label("_trial_handoff"),
+            case((m.Run.source == TRIAL_HANDOFF_SOURCE, m.Run.state["source_trial_run_id"].as_string())).label("_source_trial_run_id"),
         )
     # RLS is still mandatory, but organizations/memberships also have deliberate
     # self-membership visibility for business selection. Explicitly narrow those
@@ -198,6 +202,12 @@ def export_page(principal: Principal, dataset: str, *, cursor: str | None = None
                 ]
             if dataset in {"automations", "runs"}:
                 record.update(_inventory_export(dataset, row))
+            if dataset == "runs":
+                if isinstance(handoff := row["_trial_handoff"], dict):
+                    keys = ("target_automation_id", "run_id", "status", "reason")
+                    record["trial_handoff"] = {key: handoff[key] for key in keys if key in handoff}
+                if row["_source_trial_run_id"]:
+                    record["source_trial_run_id"] = row["_source_trial_run_id"]
             record_bytes = len(canonical_json(record).encode())
             if record_bytes > MAX_RECORD_BYTES:
                 raise GluonsError("EXPORT_RECORD_TOO_LARGE", "A structured record exceeds the export safety limit; request administrator-assisted review.", status=422,

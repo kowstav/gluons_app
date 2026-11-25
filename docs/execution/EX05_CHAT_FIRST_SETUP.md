@@ -21,6 +21,12 @@ These tools require a connected owner for the selected business. Workflow setup 
 
 The trial combines stock evaluation with supplier draft preparation using checkpoints in the existing runtime. It takes supplied counts and creates reviewable results inside Gluons. A live rollout needs an authoritative stock feed, a selected purchase order provider, and an owner-authorized action with independent readback.
 
+### Link a separate procurement review
+
+For hardware inventory, prepare a separate `hardware_procurement` automation. Show the owner the source and destination and confirm that estimated reorder lines should flow to this review. Start both in the same shadow or historical replay mode, then use `configure_trial_handoff` with the inventory automation ID, its current version and the procurement automation ID.
+
+After a successful inventory review, `get_task_run` returns the downstream run ID or the reason the handoff was skipped. Read the procurement run for its draft and source reference. Inventory exceptions stay with the source review. The link handles purchasing needs and estimates and leaves quotes, supplier contact and order placement for separate verification. Set the destination to `null` to unlink future completions. Pausing either automation retains its existing pause behavior.
+
 ### Fictional pilot
 
 **Demo Workshop Supply** uses a synthetic Gmail handoff and the local ERP simulator for its order-entry trial. Its reorder trial takes manually supplied stock counts for **Main warehouse** and values draft quantities in INR. The shadow run uses four fixture SKUs. It groups 18 units of BEANS and 6 units of CUPS into one supplier draft estimated at ₹81.30, and flags LIDS for exceeding its quantity limit and BAGS for a missing price.
@@ -40,7 +46,7 @@ The fictional records support local acceptance. A real mailbox or hosted assista
 - Launch intake covers the initial product, market, supplier, and storefront decisions. It produces a planning draft. Provider access, public store launch, and money movement have their own gates.
 - Existing-process intake supports order-entry and inventory-reorder trials. Other processes currently end in a planning-only result.
 - Decision preferences remain separate from grants. Provider side effects require an explicit owner-approved policy. The owner can sign an eligible standing spending allowance with a passkey after reviewing its action, connection, currency and limits. The assistant can request that review in chat.
-- Email-code sign-in and spending passkeys have passed GitHub tests. Hosted email delivery and real-device passkey acceptance are pending. Combining independently scheduled automations remains pending.
+- Email-code sign-in and spending passkeys have passed GitHub tests. Hosted email delivery and real-device passkey acceptance are pending. The inventory-to-procurement handoff supports one pair of draft-only automations. General composition remains pending.
 - An authorized HTTPS environment, a supported assistant host, and explicitly approved provider access are needed for live acceptance. Local MCP, provider doubles, and the ERP simulator supply separate evidence.
 
 ## Local verification on November 21, 2026
