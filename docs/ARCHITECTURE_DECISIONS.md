@@ -1,5 +1,11 @@
 # Architecture decisions
 
+## ADR-036 Link two existing trial automations
+
+An authorized assistant or operator can link an inventory reorder trial to a hardware procurement trial in the same business. Keep each automation's own lifecycle and trigger. The destination must be running in the same trial mode when the source completes. Ambiguous inventory results and results with no reorder draft leave a visible skip reason.
+
+Create the downstream run and queue entry in the source completion transaction. Deduplicate on the downstream automation and the source run. Map eligible lines to the purchasing needs in the procurement draft, retaining the currency, estimate basis and source run. This link confers no provider or spending authority. The procurement contract stays draft-only. General runtime composition and live purchase orders require separately verified contracts and policy gates.
+
 ## ADR-035 Passkey verification for unattended spending
 
 An owner grants an unattended spending allowance by reviewing one exact policy and verifying a passkey on the Gluons web origin. Require an eligible amount-bearing action, an explicit connection, and per-action and monthly limits. The gateway checks currency as well as the limits. The WebAuthn challenge binds the user's session to the policy fingerprint. Gluons consumes it in the same transaction as the signed policy. The assistant can request a change and link the owner to review. Policy approval and activation remain separate actions.

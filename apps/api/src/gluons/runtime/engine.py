@@ -21,6 +21,7 @@ from gluons.core import GluonsError, new_id, utcnow
 from gluons.db.models import Automation, Connection, Incident, Organization, Run, StepRun
 from gluons.db.session import tenant_tx
 from gluons.net import SideEffectBlocked
+from gluons.runtime import handoffs
 from gluons.runtime.state import TERMINAL_RUN_STATES, transition_run
 from gluons.runtime.step import StepContext, StepOutcome
 from gluons.skills.contract import Node, SkillContract
@@ -117,6 +118,8 @@ def _next_node(skill: SkillContract, node: Node, outcome: StepOutcome) -> str | 
 
 def _apply_outcome(session, run: Run, step: StepRun, node: Node, skill: SkillContract, outcome: StepOutcome) -> str | None:
     """Commits one step. Returns a stop reason, or None to continue with the next node."""
+    if run.status in TERMINAL_RUN_STATES:
+        return run.status
     now = utcnow()
     step.output = outcome.output
     step.model_identifier = outcome.model_identifier
@@ -206,6 +209,9 @@ def _apply_outcome(session, run: Run, step: StepRun, node: Node, skill: SkillCon
 
 def _finish_run(session, run: Run, outcome: dict[str, Any], *, private_fields: Collection[str] = ()) -> str:
     transition_run(run, "completed")
+    handoff = handoffs.on_completed(session, run, outcome)
+    if handoff is not None:
+        outcome = {**outcome, "trial_handoff": handoff}
     run.outcome = outcome
     run.finished_at = utcnow()
     run.cursor = None

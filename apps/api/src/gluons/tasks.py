@@ -18,6 +18,7 @@ from gluons.db.models import (
     StepRun,
 )
 from gluons.db.session import tenant_tx
+from gluons.runtime.lifecycle import TRIAL_HANDOFF_SOURCE
 
 
 def serialize_run(run: Run) -> dict[str, Any]:
@@ -29,6 +30,7 @@ def serialize_run(run: Run) -> dict[str, Any]:
         "status": run.status,
         "source": run.source,
         "source_event_id": run.source_event_id,
+        "source_trial_run_id": run.state.get("source_trial_run_id") if run.source == TRIAL_HANDOFF_SOURCE else None,
         "cursor": run.cursor,
         "outcome": run.outcome,
         "error": run.error,

@@ -183,6 +183,19 @@
   - apps/api/tests/test_inventory_reorder.py::test_reorder_run_keeps_the_rules_captured_at_submission
   - apps/api/tests/test_mcp_tools_contract.py::test_chat_reorder_uses_saved_rules_and_groups_only_reviewable_lines
   blocker: The live inventory source and purchase order provider still need a selected pilot, approved access and provider proof.
+- id: AG-11
+  source: EX-05
+  requirement: Compose inventory reorder and procurement review trials from chat
+  owner: mcp
+  status: partial
+  code:
+  - apps/api/src/gluons/runtime/handoffs.py
+  - apps/api/src/gluons/runtime/engine.py
+  - apps/api/src/gluons/mcp/server.py
+  tests:
+  - apps/api/tests/test_mcp_tools_contract.py::test_inventory_handoff_queues_one_linked_procurement_draft_and_exports_provenance
+  - apps/api/tests/test_mcp_tools_contract.py::test_inventory_handoff_rejects_invalid_links_and_skips_inactive_or_empty_trials
+  blocker: This release supports one draft-only pair. General composition and live purchasing remain pending.
 - id: CN-01
   source: doc13
   requirement: One-time connection sessions with state PKCE expiry

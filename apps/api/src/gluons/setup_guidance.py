@@ -109,7 +109,7 @@ def view(org, item: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
             next_tools = ["get_business_launch_plan", "start_business_launch_plan", "pause_business_launch_plan"]
         elif skill_id == REORDER_SKILL:
             next_tools = ["configure_inventory_reorder", "get_task_status", "start_trial", "submit_inventory_trial_case",
-                          "get_task_run", "get_trial_report", "pause_task", "resume_task"]
+                          "configure_trial_handoff", "get_task_run", "get_trial_report", "pause_task", "resume_task"]
         else:
             next_tools = ["get_task_status", "list_missing_connections", "start_trial", "submit_order_trial_case",
                           "get_task_run", "get_trial_report", "policy_request_activation", "get_task_evidence",

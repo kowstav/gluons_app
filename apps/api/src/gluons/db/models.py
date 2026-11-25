@@ -647,6 +647,8 @@ class Automation(Base):
     config: Mapped[dict] = _json()
     source_connections: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
     trigger: Mapped[dict] = _json()
+    trial_handoff_target_id: Mapped[str | None] = mapped_column(
+        ForeignKey("automations.id", name="fk_automation_trial_handoff_target", ondelete="SET NULL"))
     monthly_budget_usd: Mapped[Any | None] = mapped_column(Numeric(12, 2))
     per_action_limit_usd: Mapped[Any | None] = mapped_column(Numeric(12, 2))
     model_policy: Mapped[dict] = _json()
