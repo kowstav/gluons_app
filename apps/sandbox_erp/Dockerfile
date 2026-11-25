@@ -11,9 +11,10 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PATH=/opt/venv/bin:$PATH SANDBO
 WORKDIR /app
 RUN useradd --create-home --uid 10001 simulator && mkdir /data && chown simulator:simulator /data
 COPY --from=build /opt/venv /opt/venv
-# Runtime does not need pip; retain only the fixed Debian zlib package.
+# Pin the Debian compression security updates and remove runtime pip.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends 'zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1' \
+    && apt-get install -y --no-install-recommends \
+       'zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1' 'libzstd1=1.5.7+dfsg-1+deb13u1' \
     && rm -rf /var/lib/apt/lists/* \
     && /opt/venv/bin/python -m pip uninstall -y pip \
     && /usr/local/bin/python -m pip uninstall -y pip

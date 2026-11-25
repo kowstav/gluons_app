@@ -16,9 +16,10 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PATH=/opt/venv/bin:$PATH
 WORKDIR /app
 RUN useradd --create-home --uid 10001 gluons && mkdir /app/.gluons-data && chown gluons:gluons /app/.gluons-data
 COPY --from=build /opt/venv /opt/venv
-# Keep build tooling out of the runtime and install the fixed Debian zlib package.
+# Pin the Debian compression security updates and remove runtime pip.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends 'zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1' \
+    && apt-get install -y --no-install-recommends \
+       'zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1' 'libzstd1=1.5.7+dfsg-1+deb13u1' \
     && rm -rf /var/lib/apt/lists/* \
     && /opt/venv/bin/python -m pip uninstall -y pip \
     && /usr/local/bin/python -m pip uninstall -y pip
