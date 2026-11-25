@@ -16,11 +16,13 @@ import anyio
 import httpx2
 import pytest
 import uvicorn
+from fastapi.testclient import TestClient
 from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import select
 
 from gluons import approvals, data_export, passport
+from gluons.api.app import create_app
 from gluons.connections import google
 from gluons.core import GluonsError, new_id
 from gluons.db.models import Automation, AutomationPolicy, ConnectionSession, Notification, Organization, PhoneRoute, Run
@@ -29,6 +31,7 @@ from gluons.mcp.server import create_mcp_app
 from gluons.mcp.server import create_server as create_mcp_server
 from gluons.runtime import engine, lifecycle
 from helpers import World, drain
+from test_api_foundation import signed_in_org
 from test_assistant_oauth import issue
 
 ALL_SCOPES = "gluons.read gluons.plan gluons.tasks gluons.connections gluons.approvals"
@@ -397,7 +400,11 @@ def test_inventory_handoff_queues_one_linked_procurement_draft_and_exports_prove
         assert runs[0].input["facts"] == {"bom": [{"part_number": "RELAY-12V", "quantity": 8, "supplier": "Parts Co",
                                                     "estimated_total_minor": 20000}], "currency": "INR",
                                          "inventory_basis": "synthetic", "cost_basis": "configured_unit_estimates"}
-    runs = {row["id"]: row for row in data_export.export_page(world.owner, "runs")["records"]}
+    with TestClient(create_app()) as browser:
+        headers = signed_in_org(browser, world)
+        exported = browser.post("/v1/data-export/runs", headers=headers, json={})
+    assert exported.status_code == 200
+    runs = {row["id"]: row for row in exported.json()["records"]}
     assert runs[source_run_id]["trial_handoff"] == link_result
     assert runs[target_run_id]["source_trial_run_id"] == source_run_id
 
