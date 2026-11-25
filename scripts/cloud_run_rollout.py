@@ -28,15 +28,22 @@ def traffic_split(description: dict[str, Any]) -> dict[str, int]:
     return split
 
 
-def check_candidate(description: dict[str, Any], revision: str, previous: dict[str, int]) -> None:
+def check_candidate(gcloud: Gcloud, name: str, revision: str, previous: dict[str, int]) -> None:
+    description = gcloud("services", "describe", name)
     status = description.get("status", {})
-    ready = any(item.get("type") == "Ready" and item.get("status") == "True"
-                for item in status.get("conditions", []))
-    if (not ready or revision != status.get("latestCreatedRevisionName")
-            or revision != status.get("latestReadyRevisionName") or revision in previous):
+    service_ready = any(item.get("type") == "Ready" and item.get("status") == "True"
+                        for item in status.get("conditions", []))
+    if not service_ready or revision != status.get("latestCreatedRevisionName") or revision in previous:
         raise RuntimeError("Cloud Run did not report a new, ready candidate revision.")
     if traffic_split(description) != previous:
         raise RuntimeError("Serving traffic changed during candidate preparation.")
+    # A zero-traffic revision can be Ready with reason Retired while the service's
+    # latestReadyRevisionName still names the revision serving requests.
+    candidate = gcloud("revisions", "describe", revision)
+    conditions = {item.get("type"): item.get("status") for item in candidate.get("status", {}).get("conditions", [])}
+    if (candidate.get("metadata", {}).get("name") != revision
+            or conditions.get("Ready") != "True" or conditions.get("ContainerReady") != "True"):
+        raise RuntimeError("Cloud Run did not report a new, ready candidate revision.")
 
 
 def roll_out(gcloud: Gcloud, prefix: str, suffix: str, images: dict[str, str], percent: int,
@@ -51,13 +58,13 @@ def roll_out(gcloud: Gcloud, prefix: str, suffix: str, images: dict[str, str], p
     for role, name in zip(SERVICES, names, strict=True):
         gcloud("services", "update", name, "--image", images["web" if role == "web" else "api"],
                "--revision-suffix", suffix, "--no-traffic")
-        check_candidate(gcloud("services", "describe", name), candidates[name], previous[name])
+        check_candidate(gcloud, name, candidates[name], previous[name])
 
     print(f"Previous traffic splits: {json.dumps(previous, sort_keys=True)}", flush=True)
     attempted = []
     try:
         for name, revision in candidates.items():
-            check_candidate(gcloud("services", "describe", name), revision, previous[name])
+            check_candidate(gcloud, name, revision, previous[name])
             # Record the attempt first. A request may apply before the CLI sees its response.
             attempted.append(name)
             gcloud("services", "update-traffic", name, "--to-revisions", f"{revision}={percent}")

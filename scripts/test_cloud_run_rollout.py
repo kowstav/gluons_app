@@ -19,6 +19,13 @@ class CloudRun:
         self.bad_revision: str | None = None
 
     def __call__(self, resource: str, action: str, name: str, *args: str) -> dict:
+        if resource == "revisions":
+            assert action == "describe" and name in self.revisions.values()
+            ready = "False" if self.revisions.get(self.bad_revision or "") == name else "True"
+            return {"metadata": {"name": name}, "status": {"conditions": [
+                {"type": "Ready", "status": ready, "reason": "Retired"},
+                {"type": "ContainerReady", "status": "True"},
+            ]}}
         assert resource == "services"
         if action == "update":
             assert "--no-traffic" in args
@@ -40,12 +47,12 @@ class CloudRun:
         revision = self.revisions.get(name)
         return {"status": {"traffic": [{"revisionName": rev, "percent": share} for rev, share in self.splits[name].items()],
                            "latestCreatedRevisionName": revision,
-                           "latestReadyRevisionName": revision if name != self.bad_revision else "old-a",
+                           "latestReadyRevisionName": "old-a",
                            "conditions": [{"type": "Ready", "status": "True"}]}}
 
 
 class RolloutTest(unittest.TestCase):
-    def test_canary_remains_at_ten_percent_after_smoke_passes(self) -> None:
+    def test_ready_zero_traffic_revision_can_become_the_ten_percent_canary(self) -> None:
         cloud = CloudRun()
         smoke = Mock()
         candidates = rollout.roll_out(cloud, "gluons", "r123-1", IMAGES, 10, smoke)
@@ -74,7 +81,7 @@ class RolloutTest(unittest.TestCase):
         ])
         self.assertTrue(all(split == cloud.previous for split in cloud.splits.values()))
 
-    def test_an_old_ready_revision_cannot_pass_candidate_preparation(self) -> None:
+    def test_ready_service_cannot_pass_when_the_exact_revision_is_not_ready(self) -> None:
         cloud = CloudRun()
         cloud.bad_revision = "gluons-web"
         with self.assertRaisesRegex(RuntimeError, "new, ready candidate"):
