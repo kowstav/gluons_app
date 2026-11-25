@@ -31,7 +31,9 @@ def traffic_split(description: dict[str, Any]) -> dict[str, int]:
 def check_candidate(gcloud: Gcloud, name: str, revision: str, previous: dict[str, int]) -> None:
     description = gcloud("services", "describe", name)
     status = description.get("status", {})
-    if revision != status.get("latestCreatedRevisionName") or revision in previous:
+    service_ready = any(item.get("type") == "Ready" and item.get("status") == "True"
+                        for item in status.get("conditions", []))
+    if not service_ready or revision != status.get("latestCreatedRevisionName") or revision in previous:
         raise RuntimeError("Cloud Run did not report a new, ready candidate revision.")
     if traffic_split(description) != previous:
         raise RuntimeError("Serving traffic changed during candidate preparation.")
