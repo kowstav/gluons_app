@@ -1,10 +1,18 @@
 # Deployment status
 
+## Hosted staging release and email delivery on November 26, 2026
+
+GitHub built and scanned the staging images, ran the database migration and skill sync, and verified public readiness. Cloud Run confirmed the intended release on all five staging services. The rollout checks the exact candidate revision before shifting traffic. [Staging release](https://github.com/kowstav/gluons_app/actions/runs/45626818067) · [Rollout correction](https://github.com/kowstav/gluons_app/pull/22)
+
+Staging accepted one sign-in code request through the owner site's same-origin route. Gmail accepted the message and the pilot owner confirmed it reached their inbox. A request for an address outside the approved list returned HTTP 403, and unauthenticated MCP still returned HTTP 401. Browser code redemption, real-device passkey approval, and OAuth through an actual assistant host still need verification. [Account mail runbook](runbooks/secrets_and_webhooks.md#staging-account-mail)
+
+Production readiness also requires alert delivery, an isolated backup restore, and a consenting business trial with independently verified provider results.
+
 ## Account and spending release candidate on November 24, 2026
 
 Email-code sign-in and passkey confirmation for eligible unattended spending allowances are merged. GitHub tested email code delivery through the file outbox, browser-bound one-time verification, and passkey enrollment and policy signing with Chromium's virtual authenticator on desktop and mobile. These changes still need a hosted SMTP and real-device test. [Email sign-in CI](https://github.com/kowstav/gluons_app/actions/runs/45411523731) · [Spending passkey CI](https://github.com/kowstav/gluons_app/actions/runs/45414930573)
 
-Staging still runs the earlier candidate when its database is active. Staging database activation was verified as `NEVER` after the pilot. Owner sign-in and passkey acceptance can be run against the existing services during an approved window after SMTP is configured and the newer release is deployed. [Account mail runbook](runbooks/secrets_and_webhooks.md#staging-account-mail)
+At that checkpoint, staging still ran the earlier candidate when its database was active. Staging database activation was verified as `NEVER` after the pilot. Hosted owner sign-in and passkey testing were pending. [Account mail runbook](runbooks/secrets_and_webhooks.md#staging-account-mail)
 
 ## Credit-limited staging pilot on November 24, 2026
 
