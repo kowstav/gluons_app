@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from dataclasses import asdict, replace
 
@@ -9,7 +11,7 @@ from pixeltable_pgserver.pgexec import pgexec
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 
-from gluons import cli, devdb
+from gluons import devdb
 from gluons.core import new_id
 from gluons.db.models import ActionReceipt, AuditEvent
 from gluons.db.session import tenant_tx
@@ -18,8 +20,7 @@ from helpers import World, drain, order_event
 from test_order_vertical import approve, pending_approval
 
 
-def test_postgres_restore_verifies_audit_and_receipts_without_resuming_jobs(database, world, erp, sandbox_erp,
-                                                                         tmp_path, monkeypatch, capsys):
+def test_postgres_restore_verifies_audit_and_receipts_without_resuming_jobs(database, world, erp, sandbox_erp, tmp_path):
     other = World.create("Other recovery fixture")
     world.connect_erp(sandbox_erp)
     automation = world.supervised_automation()
@@ -53,10 +54,12 @@ def test_postgres_restore_verifies_audit_and_receipts_without_resuming_jobs(data
 
         witness_path = tmp_path / "witness.json"
         witness_path.write_text(json.dumps(asdict(witness)), encoding="utf-8")
-        monkeypatch.setenv("GLUONS_RESTORE_DATABASE_URL", target.app_url)
-        monkeypatch.setattr(sys, "argv", ["gluons", "verify-restore", "--witness", str(witness_path)])
-        assert cli.main() == 0
-        output = capsys.readouterr().out
+        result = subprocess.run(
+            [sys.executable, "-m", "gluons.cli", "verify-restore", "--witness", str(witness_path)],
+            env={**os.environ, "GLUONS_RESTORE_DATABASE_URL": target.app_url},
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+        output = result.stdout
         report = json.loads(output)
         assert report["passed"] and all(report["checks"].values())
         assert all(value not in output for value in (target_name, world.tenant_id, other.tenant_id, receipt.id, audit_head))
