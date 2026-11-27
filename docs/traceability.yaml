@@ -865,10 +865,14 @@
   - docs/runbooks/secrets_and_webhooks.md
   - infra/terraform/modules/observability/main.tf
   - apps/api/src/gluons/connections/health.py
+  - apps/api/src/gluons/restore.py
   - docs/ACCOUNT_CONNECTIONS.md
+  - docs/runbooks/local_and_recovery.md
   tests:
   - apps/api/tests/test_observability_logging.py
   - apps/api/tests/test_observability_redaction.py
+  - apps/api/tests/test_restore_verification.py
+  blocker: The PostgreSQL logical-restore test uses synthetic simulator evidence. An isolated Cloud SQL restore and hosted alert delivery still need verification.
 - id: IN-05
   source: doc07
   requirement: Secure configuration refuses unsafe hosted boot
