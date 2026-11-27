@@ -43,6 +43,28 @@ def _skills(_: argparse.Namespace) -> int:
     return 0
 
 
+def _verify_restore(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from gluons.restore import RestoreWitness, verify_restore
+
+    url = os.environ.get("GLUONS_RESTORE_DATABASE_URL")
+    if not url:
+        print(json.dumps({"passed": False, "error": "restore_database_url_required"}))
+        return 2
+    try:
+        witness = RestoreWitness(**json.loads(Path(args.witness).read_text(encoding="utf-8")))
+        checks = verify_restore(url, witness)
+    except (SQLAlchemyError, OSError, TypeError, ValueError):
+        print(json.dumps({"passed": False, "error": "restore_verification_failed"}))
+        return 1
+    passed = all(checks.values())
+    print(json.dumps({"passed": passed, "checks": checks}, sort_keys=True))
+    return 0 if passed else 1
+
+
 def _operator_principal(args: argparse.Namespace):
     """Authenticate in a local terminal; passwords/tokens are never command arguments."""
     from gluons import identity
@@ -99,6 +121,9 @@ def main() -> int:
     worker.add_argument("--once", action="store_true", help="schedule and drain due work, then exit (Cloud Run job)")
     worker.set_defaults(fn=_worker)
     commands.add_parser("skills-sync", help="validate contracts and pin them").set_defaults(fn=_skills)
+    restore = commands.add_parser("verify-restore", help="read-only check of an isolated database restore")
+    restore.add_argument("--witness", required=True, help="private JSON record of expected tenant, audit and receipt evidence")
+    restore.set_defaults(fn=_verify_restore)
     phone = commands.add_parser("phone-bind", help="authenticate locally and bind an existing authorized provider number; never purchases/calls")
     for name in ("email", "tenant-id", "route-id", "number-id", "agent-id"):
         phone.add_argument(f"--{name}", required=True)
