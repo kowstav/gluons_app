@@ -2,8 +2,7 @@
 #
 # Staging runs first. Production can only follow in the same run, for the same commit, after
 # staging passed, the operator typed the confirmation, and a reviewer approved the protected
-# `production` GitHub environment. Nothing has been deployed by this workflow yet: it needs
-# the projects, Workload Identity Federation and environments in docs/DEPLOYMENT_STATUS.md.
+# `production` GitHub environment. See docs/runbooks/deployment.md for setup and verification.
 name: Deploy
 
 on:
@@ -50,6 +49,17 @@ jobs:
             --jq '.workflow_runs[0] | [.head_sha, .status, .conclusion] | join(" ")')
           if [[ "$result" != "$GITHUB_SHA completed success" ]]; then
             echo "This commit needs a successful push CI run before deployment."
+            exit 1
+          fi
+      - name: Require a configured production reviewer before starting a promotion
+        if: ${{ !inputs.staging_images_only && inputs.promote_to_production && inputs.confirm_production == 'DEPLOY PRODUCTION' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! reviewed=$(gh api "repos/$GITHUB_REPOSITORY/environments/production" \
+            --jq 'any(.protection_rules[]?; .type == "required_reviewers" and (.reviewers | length) > 0)') ||
+            [[ "$reviewed" != true ]]; then
+            echo "Configure at least one required reviewer in the GitHub production environment before promotion."
             exit 1
           fi
 
