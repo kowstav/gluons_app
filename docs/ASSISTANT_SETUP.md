@@ -16,13 +16,17 @@ HTTPS `/mcp` URL. Complete Gluons sign-in, choose the business and explicitly
 approve the requested scopes. Workspace administrators may restrict custom
 connectors. Follow [Claude's current setup instructions](https://support.claude.com/en/articles/11176164-use-connectors-to-extend-claude-s-capabilities).
 
-For supported ChatGPT configurations, use ChatGPT **on the web**, enable the
-appropriate developer/custom-MCP controls permitted by your workspace, add the
-HTTPS `/mcp` URL and choose OAuth authentication. Complete the Gluons consent
-screen. Tool access and write confirmation behavior depend on the account and
-workspace. Follow [OpenAI's current setup instructions](https://developers.openai.com/api/docs/guides/custom-mcp-server).
-Use the responsive Gluons owner portal from mobile devices when a host cannot
-install or invoke custom tools.
+To test Gluons in a supported ChatGPT workspace, open **Plugins**, select **+ → Add
+custom MCP server**, and enter the HTTPS `/mcp` URL with OAuth authentication.
+Complete the Gluons consent screen, then select the plugin in a ChatGPT conversation.
+Workspace permissions determine who can add it and what actions need confirmation.
+See [ChatGPT's custom MCP setup guide](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt).
+
+Start the workflow in the assistant conversation after connecting. For example,
+ask Gluons to help start an online business and save the answers as a draft. The
+assistant can ask the setup questions, save answers and continue the draft in chat.
+Gluons opens targeted owner pages for authorization and device verification when
+the flow requires them. The web workspace is available as an optional fallback.
 
 For a compatible open-source MCP client, use OAuth discovery, register a public
 client at `/oauth/register` with exact HTTPS or loopback redirect URIs, and send
@@ -46,9 +50,12 @@ access and refresh tokens immediately, while other bindings remain independent.
 Existing authorized background automations continue until paused or cancelled;
 revoking the conversational client does not silently change business policy.
 
-The implementation has local PostgreSQL and official SDK protocol tests. It has
-not been installed into a live Claude/ChatGPT account or verified through a real
-provider. No claim of host certification or production readiness is made.
+The implementation has local PostgreSQL and official SDK protocol tests. On
+November 27, 2026, the owner connected the hosted staging server to ChatGPT and
+confirmed that it created a business setup draft, saved an answer and presented
+the next question in chat. In a new ChatGPT conversation, Gluons retrieved the
+saved draft and resumed at that question. See the [deployment status](DEPLOYMENT_STATUS.md)
+for remaining hosted and provider checks.
 
 An owner can start a guided workflow from chat. The first two entry points are
 starting an online business and handing off an existing process. See the
