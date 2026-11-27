@@ -30,7 +30,7 @@ At the end of the test window, pause the worker scheduler and stop the database.
 
 ## Later releases
 
-Dispatch `Deploy` from `main` after its exact commit passes push CI. Both application images are scanned before migrations. Keep migrations compatible with the current release, especially while the canary sends traffic to old and new code. Set up the GitHub `production` environment's required reviewers before enabling production deployment.
+Dispatch `Deploy` from `main` after its exact commit passes push CI. Both application images are scanned before migrations. Keep migrations compatible with the current release, especially while the canary sends traffic to old and new code. Set up at least one required reviewer in the GitHub `production` environment before requesting a promotion. The workflow checks that this rule exists before staging starts for that promotion. GitHub enforces the review when the production job starts.
 
 The rollout checks each exact candidate revision's `Ready` and `ContainerReady` conditions before shifting traffic. A revision with no traffic can be reported as `Retired` while the service still points to the previous serving revision. Staging then shifts all traffic to the candidates and checks the API and web public routes. Verify assistant OAuth, owner sign-in mail, worker wake and recovery, and restore separately in staging. On explicit production confirmation and environment approval, the workflow shifts 10% to the named candidate revisions. Public smoke checks on a mixed traffic split can confirm that the public routes still answer. Candidate-specific telemetry and workflow evidence are required before authorizing a further traffic change.
 
