@@ -1,5 +1,13 @@
 # Deployment status
 
+## ChatGPT staging onboarding on November 27, 2026
+
+During an owner-approved 30-minute window, the existing staging database started and the public API became ready. The OAuth discovery endpoints advertised the staging MCP resource and PKCE with S256. The owner confirmed browser email-code sign-in and connected the staging MCP server to ChatGPT. Owner-provided screenshots showed ChatGPT creating a business setup draft, saving the first answer and presenting the next question. A new ChatGPT conversation retrieved the saved draft and resumed at the target-market question. The screenshots are kept out of the repository. [Hosted release](https://github.com/kowstav/gluons_app/actions/runs/45626818067) · [Chat-first setup](ASSISTANT_SETUP.md)
+
+This evidence covers draft setup on a real assistant host. Spending approval with a physical passkey, hosted alert delivery, isolated Cloud SQL restore and a consenting business workflow with independent provider readback remain on the release checklist.
+
+The database was stopped and independently confirmed with activation policy `NEVER` after 23 minutes and 22 seconds. The worker scheduler remained paused.
+
 ## Hosted staging release and email delivery on November 26, 2026
 
 GitHub built and scanned the staging images, ran the database migration and skill sync, and verified public readiness. Cloud Run confirmed the intended release on all five staging services. The rollout checks the exact candidate revision before shifting traffic. [Staging release](https://github.com/kowstav/gluons_app/actions/runs/45626818067) · [Rollout correction](https://github.com/kowstav/gluons_app/pull/22)
