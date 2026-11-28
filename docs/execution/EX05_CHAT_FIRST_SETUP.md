@@ -12,6 +12,8 @@ The assistant asks the questions and uses the existing Gluons tools to save answ
 
 These tools require a connected owner for the selected business. Workflow setup reads require `gluons.read`, drafts and answers also require `gluons.plan`, and preparing or selecting Gmail requires `gluons.connections`. The existing permissions control task execution and pause separately.
 
+New launch setups ask about the offer and prior work before asking who should decide. Physical goods include supplier choices. Digital products and services retain a planning draft with relevant questions and prerequisites. For existing-work handoff, ask whether the owner has examples or written procedures. When the owner delegates a decision within rules, ask for those rules and show them in the decision summary. Review the returned setup areas with the owner and reuse confirmed access where appropriate. Earlier sessions keep their original question sequence and answers.
+
 ## Review inventory reordering in chat
 
 1. Choose `inventory_reorder` in an existing workflow setup. Create the suggested `inventory_reorder` automation and link it as the workflow draft.

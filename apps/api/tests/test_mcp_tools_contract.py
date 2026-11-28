@@ -159,10 +159,13 @@ def test_launch_intake_reuses_confirmed_passport_and_links_draft_without_authori
     answers = _answers(setup, (
         ("business_idea", "Sell office supplies to small businesses"),
         ("market", "IN"),
+        ("offer_type", "physical_goods"),
+        ("launch_experience", "some_decisions_made"),
         ("product_decision", "assistant_recommends"),
         ("supplier_decision", "already_chosen"),
         ("supplier_name", "Existing Supply Co"),
         ("storefront_decision", "assistant_decides_within_rules"),
+        ("storefront_rules", "Consider only a storefront that supports inventory export."),
     ))
     _, results = session(mcp_url, world, *answers,
                          ("create_business_launch_plan", {"goal": "Sell office supplies", "country": "IN",
@@ -170,6 +173,7 @@ def test_launch_intake_reuses_confirmed_passport_and_links_draft_without_authori
     states = [payload(result) for result in results]
     assert states[0]["guidance"]["next_question"]["suggested_answer"] == {"value": "IN", "source": "business_passport"}
     assert "market" not in states[0]["guidance"]["answers"]
+    assert states[-3]["guidance"]["next_question"]["id"] == "storefront_rules"
     assert states[-2]["guidance"]["status"] == "ready_to_draft"
     draft = states[-1]
     _, [linked, listed] = session(mcp_url, world,
@@ -179,10 +183,70 @@ def test_launch_intake_reuses_confirmed_passport_and_links_draft_without_authori
     linked = payload(linked)
     assert linked["guidance"]["workflow_draft"] == {"kind": "launch_plan", "id": draft["id"]}
     assert linked["guidance"]["authorization"] == "none"
+    assert linked["guidance"]["decision_plan"] == [
+        {"decision": "product_decision", "label": "Choose the offer", "mode": "assistant_recommends"},
+        {"decision": "supplier_decision", "label": "Choose a supplier", "mode": "already_chosen", "owner_choice": "Existing Supply Co"},
+        {"decision": "storefront_decision", "label": "Choose the storefront approach", "mode": "assistant_decides_within_rules",
+         "rules": "Consider only a storefront that supports inventory export."},
+    ]
+    assert {area["id"] for area in linked["guidance"]["setup_areas"]} == {
+        "web_and_storefront", "receive_payments", "shipping_and_fulfillment", "send_payments",
+    }
+    assert "authorize_spending" in linked["guidance"]["owner_only"]
     assert payload(listed)["sessions"][0]["workflow_artifact"]["id"] == draft["id"]
     exported = data_export.export_page(owner, "setup_sessions")
     assert "assistant_recommends" in str(exported)
     assert "link_hash" not in str(exported) and "idempotency_hash" not in str(exported)
+
+
+def test_digital_business_resumes_in_chat_and_does_not_link_physical_commerce(mcp_url, world):
+    setup = _start_workflow(mcp_url, world, "start_business")
+    _, results = session(mcp_url, world, *_answers(setup, (
+        ("business_idea", "Sell online courses to hobbyists"),
+        ("market", "IN"),
+        ("offer_type", "digital_products"),
+        ("launch_experience", "starting_from_scratch"),
+        ("product_decision", "assistant_decides_within_rules"),
+        ("product_rules", "Favor courses I can teach with my current equipment."),
+        ("storefront_decision", "owner_decides"),
+    )))
+    completed = payload(results[-1])
+    guidance = completed["guidance"]
+    assert guidance["status"] == "planning_only" and guidance["next_question"] is None
+    assert [area["id"] for area in guidance["setup_areas"]] == ["web_and_storefront", "receive_payments"]
+    assert [row["decision"] for row in guidance["decision_plan"]] == ["product_decision", "storefront_decision"]
+    assert "create_business_launch_plan" not in guidance["next_tools"]
+    _, [resumed, rejected, corrected] = session(
+        mcp_url, world,
+        ("get_workflow_setup", {"setup_id": setup["id"]}),
+        ("link_workflow_draft", {"setup_id": setup["id"], "draft_id": "lnp_unused", "expected_version": completed["version"]}),
+        *_answers(completed, (("offer_type", "physical_goods"),)),
+    )
+    assert payload(resumed) == completed
+    assert error_code(rejected) == "CONFLICT"
+    guidance = payload(corrected)["guidance"]
+    assert guidance["next_question"]["id"] == "product_decision"
+    assert guidance["decision_plan"] == [] and "product_rules" not in guidance["answers"]
+    _, [chosen, confirmed] = session(mcp_url, world, *_answers(payload(corrected), (
+        ("product_decision", "already_chosen"), ("chosen_offer", "Printed workshop guides"),
+    )))
+    assert payload(chosen)["guidance"]["next_question"]["id"] == "chosen_offer"
+    assert payload(confirmed)["guidance"]["decision_plan"][0]["owner_choice"] == "Printed workshop guides"
+
+
+def test_legacy_launch_setup_resumes_with_its_original_questions(mcp_url, world):
+    setup = _start_workflow(mcp_url, world, "start_business")
+    with tenant_tx(world.tenant_id) as db:
+        org = db.get(Organization, world.tenant_id)
+        records = dict(org.setup_sessions)
+        legacy = dict(records[setup["id"]])
+        legacy.pop("questionnaire_version")
+        legacy.update(answers={"business_idea": "Sell office supplies", "market": "IN"}, version=3)
+        org.setup_sessions = {**records, setup["id"]: legacy}
+    resumed = _start_workflow(mcp_url, world, "start_business")
+    assert resumed["id"] == setup["id"] and resumed["version"] == 3
+    assert resumed["guidance"]["next_question"]["id"] == "product_decision"
+    assert resumed["guidance"]["authorization"] == "none"
 
 
 def test_workflow_answers_check_scope_version_tenant_and_relevant_questions(mcp_url, world):
@@ -193,22 +257,32 @@ def test_workflow_answers_check_scope_version_tenant_and_relevant_questions(mcp_
     call = _answers(setup, (("process", "other"),))[0]
     _, [read_only] = session(mcp_url, world, call, scopes="gluons.read")
     assert error_code(read_only) == "FORBIDDEN"
-    _, [invalid, saved, duplicate, stale, secret] = session(
+    _, [invalid, saved, duplicate, stale] = session(
         mcp_url, world,
         _answers(setup, (("intake_channel", "gmail"),))[0], call, call,
         _answers(setup, (("process", "order_intake"),))[0],
-        ("answer_workflow_setup", {"setup_id": setup["id"], "question_id": "process_example",
-                                   "answer": "password: sample", "expected_version": 2}),
     )
     assert payload(saved) == payload(duplicate)
-    assert [error_code(r) for r in (invalid, stale, secret)] == ["VALIDATION_FAILED", "CONFLICT_VERSION", "VALIDATION_FAILED"]
-    _, results = session(mcp_url, world, *_answers(payload(saved), (
+    assert [error_code(r) for r in (invalid, stale)] == ["VALIDATION_FAILED", "CONFLICT_VERSION"]
+    question = payload(saved)["guidance"]["next_question"]
+    assert question["choice_labels"]["receive_payments"] == "Receive payments"
+    assert question["choice_labels"]["send_payments"] == "Send payments"
+    _, prelim = session(mcp_url, world, *_answers(payload(saved), (
+        ("primary_setup_area", "alerts_and_escalations"), ("handoff_readiness", "have_examples"),
+    )))
+    following = payload(prelim[-1])
+    _, [secret] = session(mcp_url, world, *_answers(following, (("process_example", "password: sample"),)))
+    assert error_code(secret) == "VALIDATION_FAILED"
+    _, results = session(mcp_url, world, *_answers(following, (
         ("process_example", "Stock falls below ten units"),
         ("system_of_record", "The warehouse"),
         ("routine_decision", "assistant_recommends"),
         ("exceptions", "Ask about price changes. Done when the supplier accepts."),
     )))
-    assert payload(results[-1])["guidance"]["status"] == "planning_only"
+    guidance = payload(results[-1])["guidance"]
+    assert guidance["status"] == "planning_only"
+    assert [area["id"] for area in guidance["setup_areas"]] == ["alerts_and_escalations"]
+    assert guidance["authorization"] == "none"
 
 
 def test_chat_gmail_handoff_is_scoped_and_resumable_without_provider_access(mcp_url, world, monkeypatch):
@@ -216,6 +290,7 @@ def test_chat_gmail_handoff_is_scoped_and_resumable_without_provider_access(mcp_
     setup = _start_workflow(mcp_url, world, "delegate_workflow")
     _, results = session(mcp_url, world, *_answers(setup, (
         ("process", "order_intake"), ("intake_channel", "gmail"),
+        ("handoff_readiness", "have_examples"),
         ("process_example", "A customer sends a purchase order."),
         ("system_of_record", "ERPNext"),
         ("routine_decision", "assistant_recommends"),
@@ -245,9 +320,11 @@ def test_chat_order_draft_runs_only_a_shadow_case_and_can_be_monitored_and_pause
     setup = _start_workflow(mcp_url, world, "delegate_workflow")
     _, results = session(mcp_url, world, *_answers(setup, (
         ("process", "order_intake"), ("intake_channel", "manual"),
+        ("handoff_readiness", "have_written_rules"),
         ("process_example", "Enter routine synthetic orders."),
         ("system_of_record", "ERPNext simulator"),
         ("routine_decision", "assistant_decides_within_rules"),
+        ("routine_rules", "Use the stated unit quantities and report unknown items for review."),
         ("exceptions", "Review unknown items and report the simulated outcome."),
     )), ("create_automation", {"skill_id": "multichannel_order_entry", "idempotency_key": "create-order-draft",
                                "config": {"connections": {"erp": erp_id}, "currency": "USD"}}))
@@ -285,6 +362,7 @@ def test_chat_reorder_uses_saved_rules_and_groups_only_reviewable_lines(mcp_url)
     setup = _start_workflow(mcp_url, world, "delegate_workflow")
     _, results = session(mcp_url, world, *_answers(setup, (
         ("process", "inventory_reorder"),
+        ("handoff_readiness", "have_examples"),
         ("process_example", "Review low stock each morning."),
         ("system_of_record", "Warehouse counts"),
         ("routine_decision", "assistant_recommends"),

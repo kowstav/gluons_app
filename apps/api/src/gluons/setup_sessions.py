@@ -206,6 +206,8 @@ def _start(principal: Principal, intent: str, launch_plan_id: str | None, idempo
                 "connection_session_id": None, "reused_connection_id": None, "reused_capabilities": [],
                 "idempotency_hash": key_hash, "request_hash": request_hash,
                 "link_hash": None, "link_expires_at": None}
+        if intent in setup_guidance.GUIDED_INTENTS:
+            item["questionnaire_version"] = setup_guidance.QUESTIONNAIRE_VERSION
         records[item["id"]] = item
         org.setup_sessions = records
         audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.created", actor=principal,
@@ -236,7 +238,7 @@ def answer_guided(principal: Principal, setup_id: str, question_id: str, answer:
         org = _org(session, principal, lock=True)
         item = _guided_item(org, setup_id, principal, active=True)
         answers = item.get("answers", {})
-        questions = setup_guidance.questions(item["intent"], answers)
+        questions = setup_guidance.questions(item)
         pending = next((q.id for q in questions if q.id not in answers), None)
         question = next((q for q in questions if q.id == question_id), None)
         if question is None or (question_id not in answers and question_id != pending):
@@ -252,9 +254,13 @@ def answer_guided(principal: Principal, setup_id: str, question_id: str, answer:
             raise conflict("Start a new setup to change the process or channel after selecting an account.")
         if question_id == "process" and question_id in answers:
             answers = {}
+        if question_id == "offer_type" and question_id in answers:
+            for offer_decision, (_, rule_id, _) in setup_guidance.DECISIONS.items():
+                answers.pop(offer_decision, None)
+                answers.pop(rule_id, None)
         answers[question_id] = value
-        if question_id == "supplier_decision" and value != "already_chosen":
-            answers.pop("supplier_name", None)
+        relevant = {q.id for q in setup_guidance.questions({**item, "answers": answers})}
+        answers = {key: answer for key, answer in answers.items() if key in relevant}
         item.update(answers=answers, version=item["version"] + 1)
         org.setup_sessions = {**org.setup_sessions, setup_id: item}
         audit.record(session, tenant_id=principal.tenant_id, category="organization", event_type="setup.answer_recorded",

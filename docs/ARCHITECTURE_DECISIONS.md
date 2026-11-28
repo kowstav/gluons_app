@@ -153,3 +153,9 @@ The first executable handoff uses the existing order-entry graph. Gmail setup re
 Register the generic reorder review as a first-party playbook beside its contract. The historical catalog and its 31 entries remain intact. Use the existing trial and run queue, with a stock evaluation step followed by supplier grouping. Rules use one stock location and currency per automation. The run captures a copy of the rules at submission so delayed execution and retries use the same inputs.
 
 The contract is draft-only and declares zero provider actions. The report identifies supplied stock and configured cost estimates. Business details live in the run and its owner export. The retained completion event records status without copying the report. Deletion uses the existing automation and run scrubbing rules. A future purchase workflow requires a chosen source and purchasing system, scoped access, owner approval and a matching provider readback.
+
+## ADR-033 Versioned chat intake and decision review
+
+Version the question sequence within the existing durable setup session. Earlier sessions keep their saved progress and question contract. New sessions ask about the type of offer or the state of the existing process before collecting delegated decisions. A delegation within rules requires a recorded rule before intake is complete. Changing an offer invalidates choices tied to that offer. Digital and service setups retain their answers without linking to the physical-goods launch plan. Continue using the existing edit, version, expiry, export and deletion paths for the stored answers.
+
+The decision summary and setup-area prerequisites are derived from the answers. They help the owner see what can be reused and which decisions need review. They do not create provider grants, edit workflow policies or elevate an assistant's authority. Sending payments, receiving payments and alerts have distinct prerequisites even when accounts can be reused.
