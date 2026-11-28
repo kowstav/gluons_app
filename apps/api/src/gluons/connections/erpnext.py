@@ -20,7 +20,7 @@ def target() -> tuple[str, str] | None:
         return None
     try:
         parts = urlsplit(raw_origin)
-        if (parts.scheme != "https" or not parts.hostname or parts.username or parts.password
+        if (parts.scheme != "https" or not parts.hostname or parts.username is not None or parts.password is not None
                 or parts.path not in ("", "/") or parts.query or parts.fragment or parts.port == 0):
             return None
     except ValueError:
