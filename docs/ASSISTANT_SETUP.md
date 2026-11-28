@@ -61,3 +61,10 @@ An owner can start a guided workflow from chat. The first two entry points are
 starting an online business and handing off an existing process. See the
 [chat-first setup guide](execution/EX05_CHAT_FIRST_SETUP.md) for the question,
 provider handoff, draft, and shadow trial flow.
+
+For an existing order workflow, first look for a confirmed ERPNext account in
+`list_connections`. When the owner needs a new connection, call `connect_service`
+with provider `erpnext` and share the returned setup link. The owner uses that page
+to verify and confirm the restricted account. Return to the chat and refresh the
+connection list before using it in a draft. The setup never asks for keys in chat
+and does not approve writes. [ERPNext configuration](EXTERNAL_DEPENDENCIES.md)

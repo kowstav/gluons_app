@@ -91,11 +91,11 @@ class ErpOrderConnector:
         except httpx.TimeoutException as exc:
             raise ProviderError("ambiguous", "ERP timed out before confirming") from exc
         except httpx.TransportError as exc:
-            raise ProviderError("ambiguous", f"ERP connection failed: {exc}") from exc
+            raise ProviderError("ambiguous", "ERP connection failed before confirming the outcome.") from exc
         if response.status_code in ambiguous_statuses or (reconciling and response.status_code >= 400):
             raise ProviderError("ambiguous", "ERP did not confirm the order outcome.", status=response.status_code)
         if response.status_code >= 400:
-            raise classify_http(response.status_code, response.text)
+            raise classify_http(response.status_code, "ERPNext refused the request.")
         return response
 
     def prepare(self, ctx: ConnectorContext, payload: BaseModel) -> dict[str, Any]:

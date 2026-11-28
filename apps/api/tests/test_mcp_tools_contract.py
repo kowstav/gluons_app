@@ -13,6 +13,7 @@ from dataclasses import replace
 from decimal import Decimal
 
 import anyio
+import httpx
 import httpx2
 import pytest
 import uvicorn
@@ -21,14 +22,25 @@ from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import select
 
-from gluons import approvals, data_export, passport
+from gluons import approvals, data_export, passport, vault
 from gluons.api.app import create_app
-from gluons.connections import google
+from gluons.config import get_settings
+from gluons.connections import erpnext, google
 from gluons.core import GluonsError, new_id
-from gluons.db.models import Automation, AutomationPolicy, ConnectionSession, Notification, Organization, PhoneRoute, Run
+from gluons.db.models import (
+    Automation,
+    AutomationPolicy,
+    Connection,
+    ConnectionSession,
+    Notification,
+    Organization,
+    PhoneRoute,
+    Run,
+)
 from gluons.db.session import tenant_tx
 from gluons.mcp.server import create_mcp_app
 from gluons.mcp.server import create_server as create_mcp_server
+from gluons.net import GuardedClient
 from gluons.runtime import engine, lifecycle
 from helpers import World, drain
 from test_api_foundation import signed_in_org
@@ -313,6 +325,68 @@ def test_chat_gmail_handoff_is_scoped_and_resumable_without_provider_access(mcp_
     with tenant_tx(world.tenant_id) as db:
         saved = db.get(ConnectionSession, handoff["connection"]["id"])
         assert saved.connection_id is None and saved.state_hash is None
+
+
+def test_chat_erpnext_handoff_checks_owner_and_vaults_only_verified_account(mcp_url, world, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "erpnext_base_url", "https://erp.example.com")
+    monkeypatch.setattr(settings, "erpnext_environment", "sandbox")
+    credentials = {"api_key": "synthetic-key", "api_secret": "synthetic-secret"}
+    requests = []
+    remote_account = "Administrator"
+
+    def provider(request):
+        requests.append((request.method, request.url.path))
+        assert request.url.host == "erp.example.com"
+        assert request.headers["Authorization"] == "token synthetic-key:synthetic-secret"
+        if request.url.path == "/api/method/frappe.auth.get_logged_user":
+            return httpx.Response(200, json={"message": remote_account})
+        assert request.url.path == "/api/resource/Sales Order"
+        return httpx.Response(200, json={"data": []})
+
+    def provider_client(*args, **kwargs):
+        return GuardedClient(*args, transport=httpx.MockTransport(provider), **kwargs)
+
+    monkeypatch.setattr(erpnext, "GuardedClient", provider_client)
+    _, [opened] = session(mcp_url, world, ("connect_service", {
+        "provider": "erpnext", "capabilities": ["read_sales_orders"], "idempotency_key": "erp-handoff-test",
+    }))
+    setup = payload(opened)
+    assert setup["setup_url"].endswith(f"/connect/erpnext/{setup['session_id']}")
+    assert requests == [] and setup["connection_id"] is None
+
+    path = f"/v1/connections/sessions/{setup['session_id']}"
+    client = TestClient(create_app())
+    headers = signed_in_org(client, world)
+    assert client.post(path + "/erpnext", json=credentials).status_code == 403
+    assert client.post(path + "/erpnext", headers=headers, json=credentials | {"url": "https://other.example.com"}).status_code == 422
+    with TestClient(create_app()) as other_client:
+        other_headers = signed_in_org(other_client, World.create("Different owner"))
+        assert other_client.post(path + "/erpnext", headers=other_headers, json=credentials).status_code == 404
+    with monkeypatch.context() as changed_site:
+        changed_site.setattr(settings, "erpnext_base_url", "https://changed-erp.example.com")
+        assert client.post(path + "/erpnext", headers=headers, json=credentials).status_code == 409
+    assert requests == []
+
+    refused = client.post(path + "/erpnext", headers=headers, json=credentials)
+    assert refused.status_code == 409 and refused.json()["error"]["code"] == "PROVIDER_IDENTITY_UNVERIFIED"
+    assert client.get(path).json()["connection_id"] is None
+    remote_account = "orders-agent@example.com"
+    accepted = client.post(path + "/erpnext", headers=headers, json=credentials)
+    assert accepted.status_code == 200, accepted.text
+    connection_id = accepted.json()["connection_id"]
+    assert accepted.json()["account"] == {"display": remote_account, "confirmed": False, "status": "connected"}
+    assert set(requests) == {("GET", "/api/method/frappe.auth.get_logged_user"), ("GET", "/api/resource/Sales Order")}
+    assert not any(value in accepted.text for value in credentials.values())
+    assert client.post(path + "/erpnext", headers=headers, json=credentials).status_code == 409
+    with tenant_tx(world.tenant_id, world.user_id) as db:
+        row = db.get(Connection, connection_id)
+        assert row.environment == "sandbox" and row.account_confirmed_at is None
+        assert vault.read(db, world.tenant_id, row.credential_ref) == credentials
+    assert client.post(f"/v1/connections/{connection_id}/confirm", headers=headers).status_code == 200
+    _, [listed] = session(mcp_url, world, ("get_connection_readiness", {"connection_id": connection_id}))
+    assert payload(listed)["account_confirmed"]
+    assert not any(value in str(payload(listed)) for value in credentials.values())
 
 
 def test_chat_order_draft_runs_only_a_shadow_case_and_can_be_monitored_and_paused(mcp_url, world, erp, sandbox_erp):

@@ -355,7 +355,9 @@
   status: partial
   code:
   - apps/api/src/gluons/connectors/erpnext.py
+  - apps/api/src/gluons/connections/erpnext.py
   tests:
+  - apps/api/tests/test_mcp_tools_contract.py::test_chat_erpnext_handoff_checks_owner_and_vaults_only_verified_account
   - apps/api/tests/test_order_vertical.py::test_supervised_order_writes_once_and_is_verified_by_readback
   - apps/api/tests/test_order_vertical.py::test_altered_write_is_caught_by_readback
   - apps/api/tests/test_order_vertical.py::test_multiple_erp_matches_do_not_verify_or_repeat_uncertain_write

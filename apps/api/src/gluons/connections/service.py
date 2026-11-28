@@ -10,11 +10,11 @@ import httpx
 from sqlalchemy import select
 
 from gluons import audit, vault
-from gluons.authz import Principal
+from gluons.authz import Principal, Role
 from gluons.config import get_settings
-from gluons.connections import google
-from gluons.core import GluonsError, new_id, new_secret_token, not_found, token_hash, utcnow
-from gluons.db.models import Automation, Connection, ConnectionSession, LaunchPlan, Plan, ProviderEventSubscription
+from gluons.connections import erpnext, google
+from gluons.core import GluonsError, fingerprint, forbidden, new_id, new_secret_token, not_found, token_hash, utcnow
+from gluons.db.models import Automation, Connection, ConnectionSession, LaunchPlan, Organization, Plan, ProviderEventSubscription
 from gluons.db.session import tenant_tx
 
 PROVIDER_REQUIREMENTS = {
@@ -22,7 +22,7 @@ PROVIDER_REQUIREMENTS = {
     "whatsapp_business": "Open this setup in Gluons Web and choose Connect WhatsApp Business. Meta's own window handles the sign-in.",
     "shopify": "Install Gluons from Shopify, then choose this business. Approved pilot shops can also connect here by domain.",
     "elevenlabs": "Set up a phone route on the Business channels page. A real inbound test call is required.",
-    "erpnext": "An authorized ERPNext service account and API endpoint are required; hosted connection setup is not built yet.",
+    "erpnext": "Connect a restricted ERPNext service account for the configured pilot site.",
 }
 
 
@@ -34,12 +34,13 @@ def _owner_browser(principal: Principal) -> None:
 
 def _session(row: ConnectionSession) -> dict[str, Any]:
     status = "expired" if row.expires_at <= utcnow() and row.consumed_at is None else row.status
+    path = f"/connect/erpnext/{row.id}" if row.provider == "erpnext" else f"/setup/{row.id}"
     return {
         "session_id": row.id, "provider": row.provider, "status": status,
         "expires_at": row.expires_at.isoformat(), "connection_id": row.connection_id,
         "requested_capabilities": row.requested_capabilities, "requested_scopes": row.requested_scopes,
         "next_step": row.failure_reason or PROVIDER_REQUIREMENTS.get(row.provider),
-        "setup_url": f"{get_settings().public_web_url.rstrip('/')}/setup/{row.id}",
+        "setup_url": get_settings().public_web_url.rstrip("/") + path,
     }
 
 
@@ -68,7 +69,8 @@ def begin_session_in_transaction(session: Any, principal: Principal, provider: s
     if provider not in PROVIDER_REQUIREMENTS:
         raise GluonsError("PROVIDER_UNSUPPORTED", "This provider is not available.", status=422)
     scopes = google.scopes_for(capabilities) if provider == "gmail" else []
-    configured = provider == "gmail" and google.configured()
+    erp_target = erpnext.target() if provider == "erpnext" else None
+    configured = (provider == "gmail" and google.configured()) or erp_target is not None
     if automation_plan_id and session.get(Plan, automation_plan_id) is None and session.get(LaunchPlan, automation_plan_id) is None:
         raise not_found("Automation plan")
     row = ConnectionSession(
@@ -76,6 +78,7 @@ def begin_session_in_transaction(session: Any, principal: Principal, provider: s
         initiated_via=principal.via, binding_id=principal.binding_id, provider=provider,
         requested_capabilities=capabilities, requested_scopes=scopes,
         automation_plan_id=automation_plan_id, setup_handle_hash=token_hash(new_secret_token()),
+        extra={"site": erp_target[0], "environment": erp_target[1]} if erp_target else {},
         status="requires_external_authorization" if configured else "needs_configuration",
         expires_at=utcnow() + timedelta(seconds=get_settings().connection_session_ttl_seconds),
     )
@@ -92,7 +95,64 @@ def session_status(principal: Principal, session_id: str) -> dict:
         row = session.get(ConnectionSession, session_id)
         if row is None or row.initiated_by != principal.actor_id:
             raise not_found("Connection session")
-        return _session(row)
+        return _erp_setup_status(session, row) if row.provider == "erpnext" else _session(row)
+
+
+def _erp_setup_status(session: Any, row: ConnectionSession) -> dict:
+    result = _session(row)
+    if row.extra.get("site"):
+        result.update(site=row.extra["site"], environment=row.extra["environment"])
+    connection = session.get(Connection, row.connection_id) if row.connection_id else None
+    if connection:
+        result["account"] = {"display": connection.account_display, "confirmed": connection.account_confirmed_at is not None,
+                             "status": connection.status}
+    return result
+
+
+def authorize_erpnext(principal: Principal, session_id: str, *, api_key: str, api_secret: str) -> dict:
+    _owner_browser(principal)
+    if principal.role != Role.OWNER:
+        raise forbidden("The business owner must connect the ERPNext account.")
+    target = erpnext.target()
+    if target is None:
+        raise GluonsError("CONFIGURATION_REQUIRED", "Configure a pilot ERPNext HTTPS site and environment.", status=409)
+    origin, environment = target
+    with tenant_tx(principal.tenant_id, principal.user_id) as session:
+        row = session.get(ConnectionSession, session_id, with_for_update=True)
+        if row is None or row.initiated_by != principal.actor_id or row.provider != "erpnext":
+            raise not_found("Connection session")
+        if row.expires_at <= utcnow() or row.consumed_at is not None or row.status != "requires_external_authorization":
+            raise GluonsError("CONNECTION_SESSION_INVALID", "Start a new ERPNext connection session.", status=409)
+        if (row.extra.get("site"), row.extra.get("environment")) != target:
+            raise GluonsError("CONNECTION_SESSION_INVALID", "The configured ERPNext site changed. Start a new setup.", status=409)
+        credentials = {"api_key": api_key, "api_secret": api_secret}
+        account = erpnext.identity(origin, credentials)
+        if row.expires_at <= utcnow():
+            raise GluonsError("CONNECTION_SESSION_INVALID", "Start a new ERPNext connection session.", status=409)
+        account_id = fingerprint({"site": origin, "user": account, "environment": environment})
+        # Serialize competing setup sessions for the same business before inserting an active account.
+        session.get(Organization, principal.tenant_id, with_for_update=True)
+        connection = session.scalar(select(Connection).where(
+            Connection.provider == "erpnext", Connection.external_account_id == account_id, Connection.disconnected_at.is_(None),
+        ).with_for_update())
+        if connection is not None:
+            raise GluonsError("CONNECTION_ALREADY_EXISTS", "Reuse this ERPNext account or disconnect it before changing the key.", status=409)
+        now = utcnow()
+        connection = Connection(
+            id=new_id("con"), tenant_id=principal.tenant_id, provider="erpnext", environment=environment,
+            external_account_id=account_id, account_display=account, created_by=principal.actor_id,
+            credential_ref=vault.store(session, principal.tenant_id, "erpnext", credentials),
+            metadata_json={"base_url": origin}, last_checked_at=now, status="connected",
+            status_detail="ERPNext identity and Sales Order read access checked. Confirm this account before using it.",
+        )
+        session.add(connection)
+        row.consumed_at = now
+        row.connection_id = connection.id
+        row.status = "authorized"
+        session.flush()
+        audit.record(session, tenant_id=principal.tenant_id, category="permission", event_type="connection.authorized",
+                     actor=principal, resource_type="connection", resource_id=connection.id, data={"provider": "erpnext"})
+        return _erp_setup_status(session, row)
 
 
 def authorize(principal: Principal, session_id: str) -> dict:
@@ -226,12 +286,15 @@ def verify_connection(principal: Principal, connection_id: str) -> dict:
         row = session.get(Connection, connection_id, with_for_update=True)
         if row is None:
             raise not_found("Connection")
-        if row.provider != "gmail":
+        if row.provider not in {"gmail", "erpnext"}:
             raise GluonsError("VERIFICATION_UNAVAILABLE", "This provider requires a real provider-specific verification test.", status=409)
         try:
             credential = get_credential(session, principal.tenant_id, row)
-            account = google.identity(credential["access_token"])
-            if account["sub"] != row.external_account_id:
+            if row.provider == "erpnext":
+                expected_site = (row.metadata_json.get("base_url"), row.environment)
+                if erpnext.target() != expected_site or erpnext.identity(expected_site[0], credential) != row.account_display:
+                    raise GluonsError("PROVIDER_IDENTITY_MISMATCH", "The authorized ERPNext site or account changed. Reconnect.", status=409)
+            elif google.identity(credential["access_token"])["sub"] != row.external_account_id:
                 raise GluonsError("PROVIDER_IDENTITY_MISMATCH", "The authorized account changed. Reconnect.", status=409)
             row.last_checked_at = utcnow()
         except (GluonsError, httpx.HTTPError) as exc:
@@ -251,6 +314,8 @@ def confirm_account(principal: Principal, connection_id: str) -> dict:
         row = session.get(Connection, connection_id, with_for_update=True)
         if row is None:
             raise not_found("Connection")
+        if row.provider == "erpnext" and principal.role != Role.OWNER:
+            raise forbidden("The business owner must confirm the ERPNext account.")
         if row.status != "connected":
             raise GluonsError("CONNECTION_REQUIRED", "Verify the provider connection first.", status=409)
         row.account_confirmed_at = utcnow()

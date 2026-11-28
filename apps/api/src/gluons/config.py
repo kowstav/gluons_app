@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     shippo_api_token: str | None = None
 
     erpnext_base_url: str | None = None
+    erpnext_environment: Literal["sandbox", "production"] | None = None
     sandbox_erp_url: str = "http://127.0.0.1:8100"
 
     anthropic_api_key: str | None = None

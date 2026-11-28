@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from gluons.api.deps import PrincipalDep
 from gluons.config import get_settings
@@ -17,6 +17,12 @@ class BeginConnection(BaseModel):
     provider: str
     capabilities: list[str] = Field(default_factory=list, max_length=20)
     automation_plan_id: str | None = None
+
+
+class ErpnextCredentials(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    api_key: SecretStr = Field(min_length=8, max_length=128)
+    api_secret: SecretStr = Field(min_length=8, max_length=128)
 
 
 @router.post("/connections/sessions", status_code=201)
@@ -34,6 +40,12 @@ def status(session_id: str, principal: PrincipalDep) -> dict:
 @router.post("/connections/sessions/{session_id}/authorize")
 def authorize(session_id: str, principal: PrincipalDep) -> dict:
     return service.authorize(principal, session_id)
+
+
+@router.post("/connections/sessions/{session_id}/erpnext")
+def authorize_erpnext(session_id: str, body: ErpnextCredentials, principal: PrincipalDep) -> dict:
+    return service.authorize_erpnext(principal, session_id, api_key=body.api_key.get_secret_value(),
+                                     api_secret=body.api_secret.get_secret_value())
 
 
 @router.get("/oauth/gmail/callback")

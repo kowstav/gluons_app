@@ -19,7 +19,7 @@ Google is the cheapest real proof: one OAuth client gives a live Gmail test at n
 | Voice | ElevenLabs workspace with an agent, and a number it can receive on. Twilio sells no India numbers (ADR-012), so use Exotel or SIP there. | `GLUONS_ELEVENLABS_API_KEY`, `GLUONS_ELEVENLABS_WEBHOOK_SECRET`, `GLUONS_ELEVENLABS_TOOL_SECRET` | One real inbound call, a signed post-call event, a shared order |
 | Shopify | Shopify Dev Dashboard: an app set up from `infra/shopify/shopify.app.toml.example`, a development store, and protected customer data access for order webhooks | `GLUONS_SHOPIFY_CLIENT_ID`, `GLUONS_SHOPIFY_CLIENT_SECRET`, `GLUONS_SHOPIFY_INSTALL_URL`, optional `GLUONS_SHOPIFY_PILOT_SHOPS` | Install from Shopify, claim in Gluons, draft, webhooks, uninstall, payment status |
 | Carrier tracking | Shippo API token | `GLUONS_SHIPPO_API_TOKEN` | Only needed once a dispatch connector exists |
-| ERPNext | An authorized sandbox and a restricted API user | `GLUONS_ERPNEXT_BASE_URL` plus the connection flow | Write and readback against real ERPNext |
+| ERPNext | An authorized site and a restricted API user | `GLUONS_ERPNEXT_BASE_URL` and `GLUONS_ERPNEXT_ENVIRONMENT` (`sandbox` or `production`), then the secure owner handoff | Identity and Sales Order read check before owner confirmation. An approved draft write and independent readback remain separate. |
 | Email delivery | An SMTP provider and a verified domain | `GLUONS_SMTP_URL` | Deliverability. Local file mail proves nothing about this. |
 | GitHub | Create the remote, then push | None in this app | CI runs for the first time. Deploy stays manual. |
 | Docker | Open Docker Desktop once on this machine. It did not start unattended. | None | Build the three images and run `docker compose up`, then a real ERPNext for the order skill |
@@ -27,6 +27,8 @@ Google is the cheapest real proof: one OAuth client gives a live Gmail test at n
 | Google Cloud | Separate projects, billing, region, domains | `terraform.tfvars` per environment | **Chargeable.** Needs explicit owner approval before any apply. |
 
 Prefer Application Default Credentials and scoped service accounts over downloaded keys.
+
+The ERPNext pilot uses one operator-configured HTTPS origin per Gluons deployment. Set the environment to the actual provider account's classification. In Terraform, use the existing `plain_env` map for these two non-secret settings. The business owner enters the restricted service account key and secret only on the setup page opened from Gluons chat. The page shows the provider user for confirmation and Gluons stores the credentials in its vault. Reuse a confirmed account for subsequent workflows. To retire an ERPNext key, disconnect in Gluons and revoke the key at ERPNext. [Frappe token authentication](https://docs.frappe.io/framework/user/en/guides/integration/rest_api/token_based_authentication)
 
 ## Approvals only a business or person can give
 
