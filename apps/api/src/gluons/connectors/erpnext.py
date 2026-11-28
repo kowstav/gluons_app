@@ -8,7 +8,9 @@ was used is recorded on the connection and on every receipt as `environment`.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -52,6 +54,25 @@ def _total(payload: CreateErpOrder) -> int:
     return sum(i.quantity * i.unit_price_minor for i in payload.items)
 
 
+def _response_data(response: httpx.Response) -> Any:
+    try:
+        return response.json()["data"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ProviderError("ambiguous", "ERP did not return readable order data.") from exc
+
+
+def _order_lines_match(document: dict[str, Any], payload: CreateErpOrder) -> bool:
+    expected = Counter((item.sku, item.quantity, Decimal(item.unit_price_minor) / 100, payload.delivery_date or None)
+                       for item in payload.items)
+    try:
+        actual = Counter((item["item_code"], Decimal(str(item["qty"])), Decimal(str(item["rate"])),
+                          item.get("delivery_date") if payload.delivery_date else None)
+                         for item in document["items"])
+    except (KeyError, TypeError, AttributeError, InvalidOperation):
+        return False
+    return actual == expected
+
+
 class ErpOrderConnector:
     def client(self, ctx: ConnectorContext) -> GuardedClient:
         base = ctx.metadata["base_url"]
@@ -64,13 +85,15 @@ class ErpOrderConnector:
     def _url(self, ctx: ConnectorContext, suffix: str) -> str:
         return f"{ctx.metadata['base_url'].rstrip('/')}{suffix}"
 
-    def _send(self, call: Any) -> httpx.Response:
+    def _send(self, call: Any, *, reconciling: bool = False, ambiguous_statuses: tuple[int, ...] = ()) -> httpx.Response:
         try:
             response = call()
         except httpx.TimeoutException as exc:
             raise ProviderError("ambiguous", "ERP timed out before confirming") from exc
         except httpx.TransportError as exc:
             raise ProviderError("ambiguous", f"ERP connection failed: {exc}") from exc
+        if response.status_code in ambiguous_statuses or (reconciling and response.status_code >= 400):
+            raise ProviderError("ambiguous", "ERP did not confirm the order outcome.", status=response.status_code)
         if response.status_code >= 400:
             raise classify_http(response.status_code, response.text)
         return response
@@ -83,9 +106,12 @@ class ErpOrderConnector:
         response = self._send(
             lambda: client.post(
                 self._url(ctx, f"/api/resource/{SALES_ORDER}"), headers=self._headers(ctx), json=_document(payload)
-            )
+            ),
+            ambiguous_statuses=() if ctx.environment == "simulator" else (408, 502, 503),
         )
-        document = response.json()["data"]
+        document = _response_data(response)
+        if not isinstance(document, dict) or not isinstance(document.get("name"), str) or not document["name"]:
+            raise ProviderError("ambiguous", "ERP did not confirm a sales order identifier.")
         return ProviderResult(
             provider_object_id=document["name"],
             receipt={"doctype": "Sales Order", "name": document["name"], "docstatus": document.get("docstatus")},
@@ -98,17 +124,26 @@ class ErpOrderConnector:
             lambda: client.get(
                 self._url(ctx, f"/api/resource/{SALES_ORDER}"),
                 headers=self._headers(ctx),
-                params={"filters": json.dumps([["po_no", "=", payload.reference]]), "fields": json.dumps(["name"])},
-            )
+                params={"filters": json.dumps([["po_no", "=", payload.reference]]), "limit_page_length": 2},
+            ),
+            reconciling=True,
         )
-        rows = response.json()["data"]
+        rows = _response_data(response)
+        if not isinstance(rows, list):
+            raise ProviderError("ambiguous", "ERP did not return a readable order lookup.")
         if not rows:
-            return None
+            if ctx.environment == "simulator":
+                return None
+            raise ProviderError("ambiguous", "ERP lookup found no order yet. Reconcile the uncertain attempt before retrying a write.")
+        if len(rows) != 1:
+            raise ProviderError("ambiguous", "ERP lookup found multiple orders with the same reference. Reconcile before proceeding.")
+        if not isinstance(rows[0], dict) or not isinstance(rows[0].get("name"), str) or not rows[0]["name"]:
+            raise ProviderError("ambiguous", "ERP did not return a readable sales order identifier.")
         return ProviderResult(provider_object_id=rows[0]["name"], receipt={"recovered_by_lookup": True, "name": rows[0]["name"]})
 
     def verify(self, ctx: ConnectorContext, payload: BaseModel, result: ProviderResult) -> Readback:
         client = self.client(ctx)
-        name = quote(result.provider_object_id or "")
+        name = quote(result.provider_object_id or "", safe="")
         try:
             response = self._send(
                 lambda: client.get(self._url(ctx, f"/api/resource/{SALES_ORDER}/{name}"), headers=self._headers(ctx))
@@ -117,16 +152,24 @@ class ErpOrderConnector:
             if exc.status == 404:
                 return Readback(found=False, matches=False, mismatches=("order not found in ERP",))
             raise
-        document = response.json()["data"]
-        expected = {(i.sku, float(i.quantity)) for i in payload.items}
-        actual = {(i["item_code"], float(i["qty"])) for i in document.get("items", [])}
+        document = _response_data(response)
+        if not isinstance(document, dict):
+            raise ProviderError("ambiguous", "ERP did not return a readable sales order.")
         mismatches: list[str] = []
+        if document.get("name") != result.provider_object_id:
+            mismatches.append("order identifier differs")
         if document.get("customer") != payload.customer:
-            mismatches.append(f"customer is {document.get('customer')}, expected {payload.customer}")
+            mismatches.append("customer differs")
         if document.get("po_no") != payload.reference:
             mismatches.append("reference does not match")
-        if actual != expected:
-            mismatches.append(f"items are {sorted(actual)}, expected {sorted(expected)}")
+        if document.get("currency") != payload.currency:
+            mismatches.append("currency differs")
+        if type(document.get("docstatus")) is not int or document["docstatus"] != 0:
+            mismatches.append("sales order is not a draft")
+        if payload.delivery_date and document.get("delivery_date") != payload.delivery_date:
+            mismatches.append("delivery date differs")
+        if not _order_lines_match(document, payload):
+            mismatches.append("approved line items, quantities, rates or delivery dates differ")
         return Readback(
             found=True,
             matches=not mismatches,

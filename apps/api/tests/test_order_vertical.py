@@ -1,13 +1,16 @@
 """The full path: event -> extraction -> approval -> real HTTP write -> independent readback."""
 from __future__ import annotations
 
+import httpx
 import pytest
 from sqlalchemy import select
 
 from gluons import approvals
+from gluons.actions import ConnectorContext, ProviderError
+from gluons.connectors.erpnext import CreateErpOrder, ErpOrderConnector
 from gluons.db.models import ActionReceipt, Approval, Order, Run
 from gluons.db.session import tenant_tx
-from gluons.runtime import lifecycle
+from gluons.runtime import engine, lifecycle
 from helpers import drain, order_event
 
 
@@ -112,8 +115,6 @@ def test_lost_response_is_recovered_by_lookup_not_a_second_write(world, erp, san
     # The step is waiting out its backoff; force the retry to run now.
     with tenant_tx(world.tenant_id) as session:
         assert session.get(Run, run["run_id"]).status == "retrying"
-    from gluons.runtime import engine
-
     engine.advance(world.tenant_id, run["run_id"], "retry-worker")
     assert run_row(world, run["run_id"]).status == "completed"
     assert len(erp.orders()) == 1, "the retry must find the first write"
@@ -121,17 +122,52 @@ def test_lost_response_is_recovered_by_lookup_not_a_second_write(world, erp, san
     assert receipt.verified is True and receipt.attempts == 2
 
 
-def test_altered_write_is_caught_by_readback(world, erp, sandbox_erp):
+@pytest.mark.parametrize("alteration", [True, "rate", "currency", "line_count", "docstatus"])
+def test_altered_write_is_caught_by_readback(world, erp, sandbox_erp, alteration):
     world.connect_erp(sandbox_erp)
     automation = world.supervised_automation()
     run = order_event(world, automation["id"], "mail-alter")
     drain()
-    erp.fault(alter_next=True)
+    erp.fault(alter_next=alteration)
     approve(world, pending_approval(world, run["run_id"]).id)
     drain()
     assert run_row(world, run["run_id"]).status == "reconciliation_required"
     receipt = next(r for r in receipts(world) if r.action == "erp.order.create")
     assert receipt.status == "mismatch" and receipt.verified is False
+
+
+def test_multiple_erp_matches_do_not_verify_or_repeat_uncertain_write(world, erp, sandbox_erp):
+    world.connect_erp(sandbox_erp)
+    automation = world.supervised_automation()
+    run_id = order_event(world, automation["id"], "mail-duplicate-erp")["run_id"]
+    drain()
+    erp.fault(drop_response_next=True, duplicate_next=True)
+    approve(world, pending_approval(world, run_id).id)
+    drain()
+    assert run_row(world, run_id).status == "retrying"
+
+    engine.advance(world.tenant_id, run_id, "retry-worker")
+    assert len(erp.orders()) == 2
+    receipt = next(r for r in receipts(world) if r.action == "erp.order.create")
+    assert receipt.status == "uncertain" and receipt.verified is False
+    assert receipt.provider_object_id is None and "multiple orders" in receipt.warnings[0]
+
+
+@pytest.mark.parametrize("status", [200, 401, 429, 503])
+def test_non_simulated_erp_lookup_cannot_establish_absence(status):
+    def provider(request):
+        assert request.method == "GET"
+        assert request.url.params["limit_page_length"] == "2"
+        return httpx.Response(status, json={"data": []})
+
+    ctx = ConnectorContext("tenant", "connection", "erpnext", "sandbox", "test-account",
+                           {"base_url": "https://erp.example.com"}, lambda: {"api_key": "test", "api_secret": "test"},
+                           httpx.MockTransport(provider))
+    payload = CreateErpOrder(customer="Test Bistro", reference="synthetic-order",
+                             items=[{"sku": "FISH-1", "quantity": 1, "unit_price_minor": 100}])
+    with pytest.raises(ProviderError) as error:
+        ErpOrderConnector().lookup(ctx, payload, "test-key")
+    assert error.value.kind == "ambiguous"
 
 
 def test_denied_approval_writes_nothing(world, erp, sandbox_erp):

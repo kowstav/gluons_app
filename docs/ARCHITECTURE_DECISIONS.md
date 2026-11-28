@@ -67,6 +67,8 @@ A skill's status comes from `skill_evidence` rows, not from a label in a file. `
 ## ADR-009 Sandbox ERP implements a Frappe REST subset
 Real ERPNext needs Docker and several GB. `apps/sandbox_erp` is a separate process with its own datastore, and one connector talks to both. Doc 12 explicitly allows a labelled simulator. Receipts carry `environment=simulator`. The connector is **not** verified against real ERPNext until that test is run.
 
+A Sales Order receipt requires an independent read of the same draft and a match on customer, reference, currency, line counts, quantities and unit rates. Explicit delivery dates must also match. The provider total is reported separately because it may include taxes and discounts outside the approved line subtotal. Lookup requests up to two results. Multiple matches, a failed lookup, or an empty result from a real account after an ambiguous response leave the earlier write unresolved. The controlled simulator can prove an empty result in its own datastore. [Frappe REST listing](https://docs.frappe.io/framework/user/en/guides/integration/rest_api/listing_documents) · [Sales Order definition](https://github.com/frappe/erpnext/blob/version-16/erpnext/selling/doctype/sales_order/sales_order.json) · [Sales Order Item definition](https://github.com/frappe/erpnext/blob/version-16/erpnext/selling/doctype/sales_order_item/sales_order_item.json)
+
 ## ADR-010 Embedded Postgres for local development and tests
 `pixeltable-pgserver` provides real PostgreSQL with pgvector and no Docker. `pgserver` itself has no Python 3.13 wheel. `docker-compose.yml` remains the equivalent path.
 
