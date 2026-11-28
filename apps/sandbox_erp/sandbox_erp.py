@@ -70,17 +70,32 @@ def create_order(document: dict[str, Any]) -> Response:
         return JSONResponse({"exc": "injected failure"}, status_code=status)
     alter = _take_fault("alter_next")
     drop = _take_fault("drop_response_next")
+    duplicate = _take_fault("duplicate_next")
     name = f"SAL-ORD-{uuid.uuid4().hex[:8].upper()}"
     items = document.get("items", [])
     total = sum(float(i["qty"]) * float(i.get("rate", 0)) for i in items)
     stored = {**document, "name": name, "docstatus": 0, "grand_total": total}
-    if alter:
+    if alter == "currency":
+        stored["currency"] = "EUR"
+    elif alter == "rate":
+        stored["items"] = [{**items[0], "rate": float(items[0]["rate"]) + 1}, *items[1:]]
+    elif alter == "line_count":
+        stored["items"] = [*items, items[0]]
+    elif alter == "docstatus":
+        stored["docstatus"] = 1
+    elif alter:
         stored["items"] = [{**items[0], "qty": float(items[0]["qty"]) + 1}, *items[1:]]
     with _lock, _db() as connection:
         connection.execute(
             "insert into sales_orders (name, po_no, doc, created) values (?, ?, ?, strftime('%s','now'))",
             (name, document.get("po_no"), json.dumps(stored)),
         )
+        if duplicate:
+            second_name = f"SAL-ORD-{uuid.uuid4().hex[:8].upper()}"
+            connection.execute(
+                "insert into sales_orders (name, po_no, doc, created) values (?, ?, ?, strftime('%s','now'))",
+                (second_name, document.get("po_no"), json.dumps({**stored, "name": second_name})),
+            )
     if drop:
         # The write landed, but the caller never learns that.
         return JSONResponse({"exc": "gateway timeout"}, status_code=504)
@@ -89,7 +104,7 @@ def create_order(document: dict[str, Any]) -> Response:
 
 @app.get("/api/resource/Sales%20Order", dependencies=[Depends(require_token)])
 @app.get("/api/resource/Sales Order", dependencies=[Depends(require_token)])
-def list_orders(filters: str | None = None) -> dict[str, Any]:
+def list_orders(filters: str | None = None, limit_page_length: int = 20) -> dict[str, Any]:
     status = _take_fault("fail_read_next")
     if status:
         raise HTTPException(status_code=status, detail="injected failure")
@@ -98,7 +113,8 @@ def list_orders(filters: str | None = None) -> dict[str, Any]:
         if field == "po_no":
             po_no = value
     with _db() as connection:
-        rows = connection.execute("select name, po_no from sales_orders where (? is null or po_no = ?)", (po_no, po_no))
+        rows = connection.execute("select name, po_no from sales_orders where (? is null or po_no = ?) limit ?",
+                                  (po_no, po_no, limit_page_length))
         return {"data": [{"name": r["name"], "po_no": r["po_no"]} for r in rows]}
 
 

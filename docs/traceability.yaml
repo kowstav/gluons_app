@@ -350,13 +350,17 @@
     read today.
 - id: CN-14
   source: doc12
-  requirement: ERP connector with idempotent write and readback
+  requirement: ERP draft write, retry reconciliation and exact readback of approved line terms
   owner: core
   status: partial
   code:
   - apps/api/src/gluons/connectors/erpnext.py
   tests:
   - apps/api/tests/test_order_vertical.py::test_supervised_order_writes_once_and_is_verified_by_readback
+  - apps/api/tests/test_order_vertical.py::test_altered_write_is_caught_by_readback
+  - apps/api/tests/test_order_vertical.py::test_multiple_erp_matches_do_not_verify_or_repeat_uncertain_write
+  - apps/api/tests/test_order_vertical.py::test_non_simulated_erp_lookup_cannot_establish_absence
+  blocker: Gluons still needs an approved real ERPNext connection and observed provider write and readback.
 - id: CN-15
   source: doc02
   requirement: Webhook inbox with signature replay and dedupe
