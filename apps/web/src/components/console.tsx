@@ -52,6 +52,8 @@ export default function Console() {
   if (loading) return <main className="startup"><Brand /><Loading /></main>;
   if (!session || authPage || session.mfa_pending) return <Auth path={session?.mfa_pending ? "/mfa" : pathname} initialError={error} onSignedIn={async () => { await loadSession(); if (authPage || pathname === "/mfa") router.push("/"); }} />;
   if (!session.active_organization_id || pathname === "/org/select") return <OrganizationSelect session={session} onDone={async () => { await loadSession(); if (pathname === "/org/select") router.push("/"); }} />;
+  const erpSetup = /^\/connect\/erpnext\/(cns_[a-f0-9]{24})$/.exec(pathname)?.[1];
+  if (erpSetup) return <ErpnextHandoff key={`${erpSetup}:${session.active_organization_id}`} id={erpSetup} organizationId={session.active_organization_id} organizationName={org?.name || ""} canAuthorize={org?.role === "owner"} />;
   const active = nav.find(([path]) => path === "/" ? pathname === "/" : pathname.startsWith(path));
   const can = (permission: string) => org?.permissions?.includes(permission) || false;
   return <div className="app-shell"><a href="#main-content" className="skip-link">Skip to main content</a>
@@ -112,6 +114,60 @@ function Auth({ path, initialError, onSignedIn }: { path: string; initialError: 
 function OrganizationSelect({ session, onDone }: { session: Session; onDone: () => Promise<void> }) {
   const [error, setError] = useState<string | null>(null); const [busy, setBusy] = useState(false);
   return <main className="onboarding-page"><Brand /><div className="onboarding-card"><div className="eyebrow">YOUR BUSINESS, YOUR WORKSPACE</div><h1>{session.organizations.length ? "Choose your business." : "Make room for better work."}</h1><p>Each business has its own connections, people, permissions and budget.</p><ErrorBox error={error} />{session.organizations.map(o => <button className="org-choice" key={o.id} onClick={async () => { try { await api(`/v1/organizations/${o.id}/select`, { method: "POST" }); await onDone(); } catch (e) { setError((e as Error).message); } }}><span className="workspace-avatar">{o.name[0]}</span><span><strong>{o.name}</strong><small>{human(o.role)}</small></span><Icon name="arrow" /></button>)}{session.organizations.length > 0 && <div className="form-divider">or add a business</div>}<form onSubmit={async e => { e.preventDefault(); setBusy(true); setError(null); const fields = Object.fromEntries(new FormData(e.currentTarget)); try { await api("/v1/organizations", { method: "POST", body: { name: fields.name, industry: fields.industry || null, country: fields.country || null } }); await onDone(); } catch (err) { setError((err as Error).message); } finally { setBusy(false); } }}><label>Business name<input name="name" required placeholder="Your business name" maxLength={200} /></label><div className="form-grid"><label>Industry<input name="industry" placeholder="e.g. Food distribution" /></label><label>Country code<input name="country" minLength={2} maxLength={2} placeholder="IN" pattern="[A-Za-z]{2}" /></label></div><button className="button primary wide" disabled={busy}>Create business workspace<Icon name="arrow" size={17} /></button></form></div></main>;
+}
+
+function ErpnextHandoff({ id, organizationId, organizationName, canAuthorize }: {
+  id: string; organizationId: string; organizationName: string; canAuthorize: boolean;
+}) {
+  const path = `/v1/connections/sessions/${id}`;
+  const { data, error, loading, load } = useResource<{
+    status: string; site?: string; environment?: string; connection_id?: string;
+    account?: { display: string; status: string; confirmed: boolean };
+  }>(path);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(actionPath: string, fields?: FormData) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api(actionPath, { method: "POST", body: fields && Object.fromEntries(fields), expectedOrganization: organizationId });
+      await load();
+    } catch (err) {
+      setFailure((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <main className="onboarding-page"><Brand /><div className="onboarding-card">
+    <h1>Connect ERPNext</h1>
+    <p>Business <strong>{organizationName}</strong></p>
+    {data?.site && <p>{data.site} · {data.environment}</p>}
+    <ErrorBox error={error || failure} retry={error ? load : undefined} />
+    {loading && <Loading />}
+    {data?.status === "requires_external_authorization" && canAuthorize && !loading && <form onSubmit={event => {
+      event.preventDefault();
+      void submit(`${path}/erpnext`, new FormData(event.currentTarget));
+    }}>
+      <p>Use a restricted ERPNext service account. Gluons will check its identity and Sales Order read access.</p>
+      <label>API key<input name="api_key" type="password" autoComplete="off" minLength={8} maxLength={128} required /></label>
+      <label>API secret<input name="api_secret" type="password" autoComplete="off" minLength={8} maxLength={128} required /></label>
+      <button className="button primary wide" disabled={busy}>Verify connection</button>
+    </form>}
+    {data?.status === "requires_external_authorization" && !canAuthorize && <p>The business owner can complete this connection.</p>}
+    {data?.status === "needs_configuration" && <p>Configure the ERPNext site and environment, then start a new setup from the chat.</p>}
+    {data && ["expired", "cancelled"].includes(data.status) && <p>Start a new ERPNext setup from the chat.</p>}
+    {data?.account?.status === "connected" && !loading && <>
+      <p>ERPNext account <strong>{data.account.display}</strong></p>
+      {data.account.confirmed ? <p role="status">Account confirmed. Return to your assistant chat to continue.</p> : <>
+        <p>Confirm that this is the account you want to use. Workflow approval happens separately.</p>
+        {data.connection_id && <button className="button primary wide" disabled={busy || !canAuthorize}
+          onClick={() => void submit(`/v1/connections/${data.connection_id}/confirm`)}>Confirm ERPNext account</button>}
+      </>}
+    </>}
+    {data?.account && data.account.status !== "connected" && <p>Start a new setup with the current ERPNext service account.</p>}
+  </div></main>;
 }
 
 function Home({ session, org }: { session: Session; org: Organization | null }) {

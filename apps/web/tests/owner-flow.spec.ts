@@ -41,6 +41,28 @@ test("a new owner signs in with a code and no password", async ({ page }) => {
   await signInByEmail(page, `code-${crypto.randomUUID()}@example.com`);
 });
 
+test("an ERPNext setup link opens a focused owner handoff", async ({ page }) => {
+  await signInByEmail(page, `erp-${crypto.randomUUID()}@example.com`);
+  await page.getByLabel("Business name", { exact: true }).fill("ERP QA Workshop");
+  await page.getByRole("button", { name: "Create business workspace" }).click();
+  await expect(page.getByRole("heading", { name: "A clearer view. A calmer day." })).toBeVisible();
+  const setupUrl = await page.evaluate(async () => {
+    const csrf = document.cookie.split("; ").find(value => value.startsWith("gluons_csrf="))?.split("=")[1];
+    if (!csrf) throw new Error("The owner session is missing CSRF protection");
+    const response = await fetch("/api/v1/connections/sessions", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      body: JSON.stringify({ provider: "erpnext" }),
+    });
+    if (!response.ok) throw new Error(`ERPNext setup returned ${response.status}`);
+    return new URL((await response.json()).setup_url).pathname;
+  });
+  await page.goto(setupUrl);
+  await expect(page.getByRole("heading", { name: "Connect ERPNext" })).toBeVisible();
+  await expect(page.getByText("Configure the ERPNext site and environment, then start a new setup from the chat.")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main navigation" })).toHaveCount(0);
+  await expect(page.getByLabel("API secret")).toHaveCount(0);
+});
+
 test("a passkey signs only the reviewed spending allowance", async ({ page, context }) => {
   const authenticator = await context.newCDPSession(page);
   await authenticator.send("WebAuthn.enable");
