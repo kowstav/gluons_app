@@ -23,6 +23,8 @@ November 10 implementation update: [PR #3](https://github.com/kowstav/gluons_app
 
 The [EX-05 chat-first setup guide](EX05_CHAT_FIRST_SETUP.md) documents guided questions for a business launch or an existing workflow, the shared Gmail handoff, and order-entry shadow trials through MCP.
 
+The [November 28 release audit](09_RELEASE_AUDIT_2026-11-28.md) reconciles the work packages with the current source, staging evidence, and the chat-first product requirements. It identifies the remaining work and the owner decisions needed for release.
+
 ## Give an agent one brief
 
 | Brief | Responsibility | Earliest start |

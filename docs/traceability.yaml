@@ -155,7 +155,7 @@
   - apps/api/tests/test_chat_fallback.py
 - id: AG-09
   source: EX-05
-  requirement: Resumable chat intake with per-decision preferences, a scoped provider handoff and an order-entry shadow case
+  requirement: Resumable chat intake with setup areas, per-decision rules, a scoped provider handoff and an order-entry shadow case
   owner: mcp
   status: partial
   code:
@@ -165,10 +165,12 @@
   - apps/api/src/gluons/runtime/lifecycle.py
   tests:
   - apps/api/tests/test_mcp_tools_contract.py::test_launch_intake_reuses_confirmed_passport_and_links_draft_without_authority
+  - apps/api/tests/test_mcp_tools_contract.py::test_digital_business_resumes_in_chat_and_does_not_link_physical_commerce
+  - apps/api/tests/test_mcp_tools_contract.py::test_legacy_launch_setup_resumes_with_its_original_questions
   - apps/api/tests/test_mcp_tools_contract.py::test_workflow_answers_check_scope_version_tenant_and_relevant_questions
   - apps/api/tests/test_mcp_tools_contract.py::test_chat_gmail_handoff_is_scoped_and_resumable_without_provider_access
   - apps/api/tests/test_mcp_tools_contract.py::test_chat_order_draft_runs_only_a_shadow_case_and_can_be_monitored_and_paused
-  blocker: Live assistant and real provider acceptance are pending.
+  blocker: The original launch intake resumed in hosted ChatGPT. Expanded intake and a real provider workflow still need hosted acceptance.
 - id: AG-10
   source: EX-05
   requirement: Chat-first inventory reorder trial with saved rules and supplier-grouped drafts

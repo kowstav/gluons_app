@@ -70,6 +70,7 @@ def create_server() -> MCPServer:
     server = MCPServer(
         "Gluons", version="0.1.0", token_verifier=TokenVerifier(),
         instructions="For starting a business or handing off work, use start_workflow_setup and follow its current question. "
+                     "Explain the returned decision plan and setup areas in chat. Ask for rules before planning delegated choices. "
                      "Resume saved setup with list_workflow_setups. Use registered Gluons skills and existing task IDs. "
                      "To link inventory and hardware procurement trials, confirm the two automation IDs with the owner "
                      "and use configure_trial_handoff, then monitor each run with get_task_run. "
@@ -110,7 +111,7 @@ def create_server() -> MCPServer:
 
     @server.tool(annotations={"readOnlyHint": True})
     def get_workflow_setup(setup_id: Id) -> dict[str, Any]:
-        """Read the next question, live connection state, or linked draft without repeating setup."""
+        """Read the next question, decision plan, setup prerequisites, and live connection or draft state."""
         return _call(lambda p: setup_sessions.get_guided(p, setup_id))
 
     @server.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
